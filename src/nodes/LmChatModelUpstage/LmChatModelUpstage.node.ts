@@ -15,14 +15,14 @@ import { getConnectionHintNoticeField } from '../../utils/sharedFields';
 
 export class LmChatModelUpstage implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Solar Chat Model',
+		displayName: 'Upstage Solar Chat for Agent',
 		name: 'lmChatModelUpstage',
 		icon: 'file:upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description: 'For advanced usage with an AI chain',
 		defaults: {
-			name: 'Solar Chat Model',
+			name: 'Upstage Solar Chat for Agent',
 		},
 		codex: {
 			categories: ['AI'],

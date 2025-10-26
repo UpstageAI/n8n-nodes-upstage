@@ -8,14 +8,14 @@ import type {
 
 export class LmChatUpstage implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Upstage Solar LLM',
+		displayName: 'Upstage Solar Chat',
 		name: 'lmChatUpstage',
 		icon: 'file:upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description: 'Use Upstage Solar models for chat completions',
 		defaults: {
-			name: 'Upstage Solar LLM',
+			name: 'Upstage Solar Chat',
 		},
 		inputs: ['main'],
 		outputs: ['main'],

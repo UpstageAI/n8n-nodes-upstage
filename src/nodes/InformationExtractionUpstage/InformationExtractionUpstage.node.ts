@@ -119,14 +119,14 @@ export class InformationExtractionUpstage implements INodeType {
 		return jsonString;
 	}
 	description: INodeTypeDescription = {
-		displayName: 'Upstage Information Extraction',
+		displayName: 'Upstage Information Extract',
 		name: 'informationExtractionUpstage',
 		icon: 'file:upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description:
 			'Extract structured data from documents/images using Upstage Information Extraction',
-		defaults: { name: 'Upstage Information Extraction' },
+		defaults: { name: 'Upstage Information Extract' },
 		inputs: ['main'],
 		outputs: ['main'],
 		credentials: [{ name: 'upstageApi', required: true }],

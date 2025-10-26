@@ -8,14 +8,14 @@ import type {
 
 export class DocumentClassificationUpstage implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Upstage Document Classification',
+		displayName: 'Upstage Document Classify',
 		name: 'documentClassificationUpstage',
 		icon: 'file:upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description:
 			'Classify documents into predefined categories using Upstage Document Classification',
-		defaults: { name: 'Upstage Document Classification' },
+		defaults: { name: 'Upstage Document Classify' },
 		inputs: ['main'],
 		outputs: ['main'],
 		credentials: [{ name: 'upstageApi', required: true }],
