@@ -62,14 +62,14 @@ function createMultipartFormData(
 
 export class DocumentParsingUpstage implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Upstage Document Parsing',
+		displayName: 'Upstage Document Parse',
 		name: 'documentParsingUpstage',
 		icon: 'file:upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description:
 			'Convert documents into structured HTML/Markdown using Upstage Document Parse',
-		defaults: { name: 'Upstage Document Parsing' },
+		defaults: { name: 'Upstage Document Parse' },
 		inputs: ['main'],
 		outputs: ['main'],
 		credentials: [{ name: 'upstageApi', required: true }],
