@@ -1,0 +1,94 @@
+{
+  "name": "n8n-nodes-upstage",
+  "version": "0.1.0",
+  "description": "Upstage LLM and Embeddings nodes for n8n",
+  "license": "MIT",
+  "homepage": "https://github.com/UpstageAI/n8n-nodes-upstage",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/UpstageAI/n8n-nodes-upstage.git"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && npm run copy-assets",
+    "copy-assets": "cp src/upstage_v2.svg dist/ && cp src/nodes/LmChatUpstage/upstage_v2.svg dist/nodes/LmChatUpstage/ && cp src/nodes/EmbeddingsUpstage/upstage_v2.svg dist/nodes/EmbeddingsUpstage/ && cp src/nodes/LmChatModelUpstage/upstage_v2.svg dist/nodes/LmChatModelUpstage/ && cp src/nodes/EmbeddingsUpstageModel/upstage_v2.svg dist/nodes/EmbeddingsUpstageModel/ && cp src/nodes/DocumentParsingUpstage/upstage_v2.svg dist/nodes/DocumentParsingUpstage/ && cp src/nodes/DocumentOCRUpstage/upstage_v2.svg dist/nodes/DocumentOCRUpstage/ && cp src/nodes/InformationExtractionUpstage/upstage_v2.svg dist/nodes/InformationExtractionUpstage/ && cp src/nodes/DocumentClassificationUpstage/upstage_v2.svg dist/nodes/DocumentClassificationUpstage/ || true",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build",
+    "test": "echo \"No tests specified\" && exit 0",
+    "lint": "eslint . --ext .js,.ts",
+    "lintfix": "eslint . --ext .js,.ts --fix",
+    "format": "prettier --write src/**/*.{ts,js,json}",
+    "format:check": "prettier --check src/**/*.{ts,js,json}"
+  },
+  "keywords": [
+    "n8n",
+    "n8n-node",
+    "n8n-community-node-package",
+    "solar",
+    "upstage",
+    "llm",
+    "ai",
+    "embeddings",
+    "machine-learning",
+    "ocr",
+    "document-processing"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/UpstageApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/LmChatUpstage/LmChatUpstage.node.js",
+      "dist/nodes/EmbeddingsUpstage/EmbeddingsUpstage.node.js",
+      "dist/nodes/LmChatModelUpstage/LmChatModelUpstage.node.js",
+      "dist/nodes/EmbeddingsUpstageModel/EmbeddingsUpstageModel.node.js",
+      "dist/nodes/DocumentParsingUpstage/DocumentParsingUpstage.node.js",
+      "dist/nodes/DocumentOCRUpstage/DocumentOCRUpstage.node.js",
+      "dist/nodes/InformationExtractionUpstage/InformationExtractionUpstage.node.js",
+      "dist/nodes/DocumentClassificationUpstage/DocumentClassificationUpstage.node.js"
+    ]
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/lodash": "^4.17.20",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "7.18.0",
+    "@typescript-eslint/parser": "7.18.0",
+    "eslint": "8.57.0",
+    "eslint-config-prettier": "9.1.0",
+    "eslint-plugin-prettier": "5.1.3",
+    "n8n-core": "^1.14.1",
+    "n8n-workflow": "^1.17.0",
+    "prettier": "3.3.3",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "lodash": ">=4.17.0",
+    "n8n-core": ">=1.0.0",
+    "n8n-workflow": ">=1.0.0"
+  },
+  "author": {
+    "name": "Euihyeon Pyeon",
+    "email": "euihyeon.pyeon@gmail.com"
+  },
+  "bugs": {
+    "url": "https://github.com/UpstageAI/n8n-nodes-upstage/issues"
+  },
+  "dependencies": {
+    "@langchain/core": "^0.3.72",
+    "@langchain/openai": "^0.6.9",
+    "https-proxy-agent": "^7.0.0",
+    "lodash": "^4.17.21"
+  },
+  "overrides": {
+    "axios": "^1.12.0"
+  }
+}
