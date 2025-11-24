@@ -64,7 +64,7 @@ export class DocumentParsingUpstage implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Upstage Document Parse',
 		name: 'documentParsingUpstage',
-		icon: 'file:upstage_v2.svg',
+		icon: 'file:../upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description:

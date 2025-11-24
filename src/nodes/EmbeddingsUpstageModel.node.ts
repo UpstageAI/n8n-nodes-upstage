@@ -5,14 +5,14 @@ import type {
 	SupplyData,
 } from 'n8n-workflow';
 
-import { logWrapper } from '../../utils/logWrapper';
-import { getConnectionHintNoticeField } from '../../utils/sharedFields';
+import { logWrapper } from '../utils/logWrapper';
+import { getConnectionHintNoticeField } from '../utils/sharedFields';
 
 export class EmbeddingsUpstageModel implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Upstage Embed for Agent',
 		name: 'embeddingsUpstageModel',
-		icon: 'file:upstage_v2.svg',
+		icon: 'file:../upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description:

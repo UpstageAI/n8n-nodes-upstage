@@ -8,16 +8,16 @@ import {
 	type INodePropertyOptions,
 } from 'n8n-workflow';
 
-import { N8nLlmTracing } from '../../utils/N8nLlmTracing';
-import { makeN8nLlmFailedAttemptHandler } from '../../utils/n8nLlmFailedAttemptHandler';
-import { getHttpProxyAgent } from '../../utils/httpProxyAgent';
-import { getConnectionHintNoticeField } from '../../utils/sharedFields';
+import { N8nLlmTracing } from '../utils/N8nLlmTracing';
+import { makeN8nLlmFailedAttemptHandler } from '../utils/n8nLlmFailedAttemptHandler';
+import { getHttpProxyAgent } from '../utils/httpProxyAgent';
+import { getConnectionHintNoticeField } from '../utils/sharedFields';
 
 export class LmChatModelUpstage implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Upstage Solar Chat for Agent',
 		name: 'lmChatModelUpstage',
-		icon: 'file:upstage_v2.svg',
+		icon: 'file:../upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description: 'For advanced usage with an AI chain',

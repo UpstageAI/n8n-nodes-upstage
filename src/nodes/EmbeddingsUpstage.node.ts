@@ -10,7 +10,7 @@ export class EmbeddingsUpstage implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Upstage Embed',
 		name: 'embeddingsUpstage',
-		icon: 'file:upstage_v2.svg',
+		icon: 'file:../upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description:

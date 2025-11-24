@@ -56,7 +56,7 @@ export class DocumentOCRUpstage implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Upstage Document OCR',
 		name: 'documentOCRUpstage',
-		icon: 'file:upstage_v2.svg',
+		icon: 'file:../upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description:

@@ -10,7 +10,7 @@ export class DocumentClassificationUpstage implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Upstage Document Classify',
 		name: 'documentClassificationUpstage',
-		icon: 'file:upstage_v2.svg',
+		icon: 'file:../upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description:
