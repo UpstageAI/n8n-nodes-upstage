@@ -40,3 +40,6 @@ coverage/
 # pnpm
 pnpm-lock.yaml
 pnpm-debug.log*
+
+# n8n local data (auto-generated when running n8n)
+n8n_data/
