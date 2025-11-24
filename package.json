@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "build": "tsc && npm run copy-assets",
-    "copy-assets": "cp src/upstage_v2.svg dist/ && cp src/nodes/LmChatUpstage/upstage_v2.svg dist/nodes/LmChatUpstage/ && cp src/nodes/EmbeddingsUpstage/upstage_v2.svg dist/nodes/EmbeddingsUpstage/ && cp src/nodes/LmChatModelUpstage/upstage_v2.svg dist/nodes/LmChatModelUpstage/ && cp src/nodes/EmbeddingsUpstageModel/upstage_v2.svg dist/nodes/EmbeddingsUpstageModel/ && cp src/nodes/DocumentParsingUpstage/upstage_v2.svg dist/nodes/DocumentParsingUpstage/ && cp src/nodes/DocumentOCRUpstage/upstage_v2.svg dist/nodes/DocumentOCRUpstage/ && cp src/nodes/InformationExtractionUpstage/upstage_v2.svg dist/nodes/InformationExtractionUpstage/ && cp src/nodes/DocumentClassificationUpstage/upstage_v2.svg dist/nodes/DocumentClassificationUpstage/ || true",
+    "copy-assets": "cp src/upstage_v2.svg dist/",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build",
@@ -23,7 +23,8 @@
     "lint": "eslint . --ext .js,.ts",
     "lintfix": "eslint . --ext .js,.ts --fix",
     "format": "prettier --write src/**/*.{ts,js,json}",
-    "format:check": "prettier --check src/**/*.{ts,js,json}"
+    "format:check": "prettier --check src/**/*.{ts,js,json}",
+    "setup:n8n": "npm run build && npm link && cd $(npm root -g)/n8n && npm link n8n-nodes-upstage --legacy-peer-deps"
   },
   "keywords": [
     "n8n",
@@ -44,14 +45,14 @@
       "dist/credentials/UpstageApi.credentials.js"
     ],
     "nodes": [
-      "dist/nodes/LmChatUpstage/LmChatUpstage.node.js",
-      "dist/nodes/EmbeddingsUpstage/EmbeddingsUpstage.node.js",
-      "dist/nodes/LmChatModelUpstage/LmChatModelUpstage.node.js",
-      "dist/nodes/EmbeddingsUpstageModel/EmbeddingsUpstageModel.node.js",
-      "dist/nodes/DocumentParsingUpstage/DocumentParsingUpstage.node.js",
-      "dist/nodes/DocumentOCRUpstage/DocumentOCRUpstage.node.js",
-      "dist/nodes/InformationExtractionUpstage/InformationExtractionUpstage.node.js",
-      "dist/nodes/DocumentClassificationUpstage/DocumentClassificationUpstage.node.js"
+      "dist/nodes/LmChatUpstage.node.js",
+      "dist/nodes/EmbeddingsUpstage.node.js",
+      "dist/nodes/LmChatModelUpstage.node.js",
+      "dist/nodes/EmbeddingsUpstageModel.node.js",
+      "dist/nodes/DocumentParsingUpstage.node.js",
+      "dist/nodes/DocumentOCRUpstage.node.js",
+      "dist/nodes/InformationExtractionUpstage.node.js",
+      "dist/nodes/DocumentClassificationUpstage.node.js"
     ]
   },
   "engines": {
@@ -85,8 +86,7 @@
   "dependencies": {
     "@langchain/core": "^0.3.72",
     "@langchain/openai": "^0.6.9",
-    "https-proxy-agent": "^7.0.0",
-    "lodash": "^4.17.21"
+    "https-proxy-agent": "^7.0.0"
   },
   "overrides": {
     "axios": "^1.12.0"
