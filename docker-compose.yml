@@ -1,0 +1,50 @@
+services:
+  builder:
+    image: node:18-alpine
+    container_name: n8n-upstage-builder
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    command: >
+      sh -c "
+        if [ ! -d dist ] || [ -z \"$$(ls -A dist 2>/dev/null)\" ]; then
+          echo 'Building n8n-nodes-upstage...' &&
+          npm ci &&
+          npm run build &&
+          echo 'Build completed successfully!'
+        else
+          echo 'Build files already exist, skipping build...'
+        fi
+      "
+    restart: "no"
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-upstage
+    depends_on:
+      builder:
+        condition: service_completed_successfully
+    ports:
+      - "5678:5678"
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+      - ./dist:/tmp/n8n-nodes-upstage/dist:ro
+      - ./package.json:/tmp/n8n-nodes-upstage/package.json:ro
+    environment:
+      - N8N_COMMUNITY_NODES_ENABLED=true
+      - N8N_CUSTOM_EXTENSIONS=/home/node/.n8n/custom
+    entrypoint: >
+      sh -c "
+        if [ ! -f /home/node/.n8n/custom/package.json ]; then
+          echo 'Installing n8n-nodes-upstage...' &&
+          mkdir -p /home/node/.n8n/custom &&
+          cp -r /tmp/n8n-nodes-upstage/* /home/node/.n8n/custom/ &&
+          cd /home/node/.n8n/custom &&
+          npm install --production --legacy-peer-deps &&
+          echo 'n8n-nodes-upstage installed successfully!'
+        else
+          echo 'n8n-nodes-upstage already installed, skipping...'
+        fi &&
+        exec n8n start
+      "
+    restart: unless-stopped
