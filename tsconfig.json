@@ -24,6 +24,8 @@
   "exclude": [
     "node_modules",
     "dist",
-    "src/references"
+    "src/references",
+    "**/__tests__/**",
+    "**/*.test.ts"
   ]
 }
