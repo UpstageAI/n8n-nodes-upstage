@@ -33,6 +33,14 @@ services:
     environment:
       - N8N_COMMUNITY_NODES_ENABLED=true
       - N8N_CUSTOM_EXTENSIONS=/home/node/.n8n/custom
+      # Performance and deprecation fixes
+      - DB_SQLITE_POOL_SIZE=10
+      - N8N_RUNNERS_ENABLED=true
+      # Security settings (more secure defaults)
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=true
+      - N8N_GIT_NODE_DISABLE_BARE_REPOS=true
+      # Fix file permissions warning
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
     entrypoint: >
       sh -c "
         if [ ! -f /home/node/.n8n/custom/package.json ]; then
