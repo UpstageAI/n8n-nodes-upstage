@@ -4,17 +4,17 @@ import type {
 	INodeTypeDescription,
 	INodeExecutionData,
 	IHttpRequestOptions,
+	JsonObject,
 } from 'n8n-workflow';
-
-// Response type definitions
-interface DocumentParsingResponse {
-	content?: {
-		html?: string;
-		markdown?: string;
-		text?: string;
-	};
-	elements?: any[];
-}
+import { handleNodeError } from '../utils/errorHandling';
+import {
+	validateFileSize,
+	validateFileSizeFromMetadata,
+} from '../utils/fileValidation';
+import {
+	isDocumentParsingResponse,
+	type DocumentParsingResponse,
+} from '../utils/typeGuards';
 
 interface AsyncSubmitResponse {
 	request_id?: string;
@@ -64,7 +64,7 @@ export class DocumentParsingUpstage implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Upstage Document Parse',
 		name: 'documentParsingUpstage',
-		icon: 'file:upstage_v2.svg',
+		icon: 'file:../upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description:
@@ -245,10 +245,17 @@ export class DocumentParsingUpstage implements INodeType {
 					}
 
 					const binaryData = item.binary[binaryPropertyName];
+
+					// Validate file size (50MB limit) - check metadata first if available
+					validateFileSizeFromMetadata(binaryData.fileSize, 50);
+
 					const buffer = await this.helpers.getBinaryDataBuffer(
 						i,
 						binaryPropertyName
 					);
+
+					// Validate file size from actual buffer
+					validateFileSize(buffer, 50);
 
 					// Prepare form fields
 					const fields: Record<string, string> = {
@@ -296,7 +303,14 @@ export class DocumentParsingUpstage implements INodeType {
 						);
 
 					if (operation === 'sync') {
-						const syncResponse = response as DocumentParsingResponse;
+						// Validate response structure using type guard
+						if (!isDocumentParsingResponse(response)) {
+							throw new Error(
+								'Invalid response format from Upstage Document Parsing API'
+							);
+						}
+
+						const syncResponse = response;
 						const returnMode = this.getNodeParameter('returnMode', i) as string;
 						if (returnMode === 'content_html') {
 							returnData.push({
@@ -320,7 +334,7 @@ export class DocumentParsingUpstage implements INodeType {
 							});
 						} else {
 							returnData.push({
-								json: syncResponse as any,
+								json: syncResponse as JsonObject,
 								pairedItem: { item: i },
 							});
 						}
@@ -345,7 +359,7 @@ export class DocumentParsingUpstage implements INodeType {
 							requestOptions
 						);
 					returnData.push({
-						json: response as any,
+						json: response as JsonObject,
 						pairedItem: { item: i },
 					});
 				} else if (operation === 'asyncList') {
@@ -360,33 +374,12 @@ export class DocumentParsingUpstage implements INodeType {
 							requestOptions
 						);
 					returnData.push({
-						json: response as any,
+						json: response as JsonObject,
 						pairedItem: { item: i },
 					});
 				}
 			} catch (error) {
-				if (this.continueOnFail()) {
-					const errorMessage =
-						error instanceof Error ? error.message : 'Unknown error';
-					const statusCode =
-						typeof error === 'object' &&
-						error !== null &&
-						'statusCode' in error &&
-						typeof error.statusCode === 'number'
-							? error.statusCode
-							: undefined;
-
-					returnData.push({
-						json: {
-							error: errorMessage,
-							statusCode,
-							timestamp: new Date().toISOString(),
-						},
-						pairedItem: { item: i },
-					});
-				} else {
-					throw error;
-				}
+				handleNodeError(this, error, i, 'Upstage Document Parsing', returnData);
 			}
 		}
 

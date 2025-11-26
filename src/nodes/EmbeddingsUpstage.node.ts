@@ -5,12 +5,19 @@ import type {
 	INodeExecutionData,
 	IHttpRequestOptions,
 } from 'n8n-workflow';
+import { handleNodeError } from '../utils/errorHandling';
+
+interface EmbeddingResponseItem {
+	index: number;
+	embedding: number[];
+	text?: string;
+}
 
 export class EmbeddingsUpstage implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Upstage Embed',
 		name: 'embeddingsUpstage',
-		icon: 'file:upstage_v2.svg',
+		icon: 'file:../upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description:
@@ -165,11 +172,13 @@ export class EmbeddingsUpstage implements INodeType {
 				// Process response
 				if (Array.isArray(input)) {
 					// Multiple embeddings
-					const embeddings = response.data.map((item: any) => ({
-						text: input[item.index],
-						embedding: item.embedding,
-						index: item.index,
-					}));
+					const embeddings = response.data.map(
+						(item: EmbeddingResponseItem) => ({
+							text: input[item.index],
+							embedding: item.embedding,
+							index: item.index,
+						})
+					);
 
 					returnData.push({
 						json: {
@@ -197,14 +206,7 @@ export class EmbeddingsUpstage implements INodeType {
 					});
 				}
 			} catch (error) {
-				if (this.continueOnFail()) {
-					returnData.push({
-						json: { error: (error as Error).message || 'Unknown error' },
-						pairedItem: { item: i },
-					});
-				} else {
-					throw error;
-				}
+				handleNodeError(this, error, i, 'Upstage Embeddings', returnData);
 			}
 		}
 

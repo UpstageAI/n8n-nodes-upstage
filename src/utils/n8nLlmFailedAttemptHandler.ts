@@ -2,6 +2,12 @@ import type { FailedAttemptHandler } from '@langchain/core/dist/utils/async_call
 import type { ISupplyDataFunctions, JsonObject } from 'n8n-workflow';
 import { NodeApiError } from 'n8n-workflow';
 
+interface RetryableError extends Error {
+	code?: string;
+	status?: number;
+	retriesLeft?: number;
+}
+
 import { n8nDefaultFailedAttemptHandler } from './n8nDefaultFailedAttemptHandler';
 
 /**
@@ -14,7 +20,7 @@ export const makeN8nLlmFailedAttemptHandler = (
 	ctx: ISupplyDataFunctions,
 	handler?: FailedAttemptHandler
 ): FailedAttemptHandler => {
-	return (error: any) => {
+	return (error: RetryableError) => {
 		try {
 			// Try custom error handler first
 			handler?.(error);
@@ -35,8 +41,8 @@ export const makeN8nLlmFailedAttemptHandler = (
 		}
 
 		// If no error was thrown, check if it is the last retry
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-		if (error?.retriesLeft > 0) {
+		const retriesLeft = (error as RetryableError)?.retriesLeft;
+		if (retriesLeft !== undefined && retriesLeft > 0) {
 			return;
 		}
 

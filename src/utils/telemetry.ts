@@ -21,7 +21,11 @@ export function logAiEvent(
 			executeFunctions.sendTelemetry(event, data);
 		}
 	} catch (error) {
-		// Silently fail if telemetry is not available
-		console.debug('Failed to send telemetry event:', event, error);
+		// Log telemetry failure for debugging, but don't throw
+		// IExecuteFunctions and ISupplyDataFunctions always have logger
+		executeFunctions.logger.debug('Failed to send telemetry event', {
+			event,
+			error: error instanceof Error ? error.message : String(error),
+		});
 	}
 }

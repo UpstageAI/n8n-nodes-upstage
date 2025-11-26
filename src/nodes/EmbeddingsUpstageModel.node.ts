@@ -3,16 +3,28 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 	SupplyData,
+	IExecuteFunctions,
+	NodeConnectionType,
 } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
 
-import { logWrapper } from '../../utils/logWrapper';
-import { getConnectionHintNoticeField } from '../../utils/sharedFields';
+interface EmbeddingResponseItem {
+	index: number;
+	embedding: number[];
+}
+
+interface EmbeddingAPIResponse {
+	data: EmbeddingResponseItem[];
+}
+
+import { getConnectionHintNoticeField } from '../utils/sharedFields';
+import { logAiEvent } from '../utils/telemetry';
 
 export class EmbeddingsUpstageModel implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Upstage Embed for Agent',
 		name: 'embeddingsUpstageModel',
-		icon: 'file:upstage_v2.svg',
+		icon: 'file:../upstage_v2.svg',
 		group: ['transform'],
 		version: 1,
 		description:
@@ -84,6 +96,109 @@ export class EmbeddingsUpstageModel implements INodeType {
 			response: logWrapper(embeddingModel, this),
 		};
 	}
+}
+
+// ============================================================================
+// Helper functions for wrapping Embeddings with n8n data flow integration
+// ============================================================================
+
+type MethodArgs = unknown[];
+
+/**
+ * Wraps async method calls with error handling
+ * @internal Exported for testing purposes
+ */
+export async function callMethodAsync<T>(
+	this: T,
+	parameters: {
+		executeFunctions: IExecuteFunctions | ISupplyDataFunctions;
+		connectionType: NodeConnectionType;
+		currentNodeRunIndex: number;
+		method: (...args: MethodArgs) => Promise<unknown>;
+		arguments: unknown[];
+	}
+): Promise<unknown> {
+	try {
+		return await parameters.method.call(this, ...parameters.arguments);
+	} catch (e) {
+		const connectedNode = parameters.executeFunctions.getNode();
+
+		const error = new NodeOperationError(connectedNode, e as Error, {
+			functionality: 'configuration-node',
+		});
+
+		throw error;
+	}
+}
+
+/**
+ * Wraps LangChain Embeddings instance to integrate with n8n data flow
+ * Adds input/output data tracking and telemetry logging
+ * @internal Exported for testing purposes
+ */
+export function logWrapper<T extends Embeddings>(
+	originalInstance: T,
+	executeFunctions: IExecuteFunctions | ISupplyDataFunctions
+): T {
+	return new Proxy(originalInstance, {
+		get: (target, prop) => {
+			// ========== Embeddings ==========
+			if (originalInstance instanceof Embeddings) {
+				// Docs -> Embeddings
+				if (prop === 'embedDocuments' && 'embedDocuments' in target) {
+					return async (documents: string[]): Promise<number[][]> => {
+						const connectionType = 'ai_embedding';
+						const { index } = executeFunctions.addInputData(connectionType, [
+							[{ json: { documents } }],
+						]);
+
+						const response = (await callMethodAsync.call(target, {
+							executeFunctions,
+							connectionType,
+							currentNodeRunIndex: index,
+							method: target[prop] as (
+								...args: MethodArgs
+							) => Promise<number[][]>,
+							arguments: [documents],
+						})) as number[][];
+
+						logAiEvent(executeFunctions, 'ai-document-embedded');
+						executeFunctions.addOutputData(connectionType, index, [
+							[{ json: { response } }],
+						]);
+						return response;
+					};
+				}
+				// Query -> Embeddings
+				if (prop === 'embedQuery' && 'embedQuery' in target) {
+					return async (query: string): Promise<number[]> => {
+						const connectionType = 'ai_embedding';
+						const { index } = executeFunctions.addInputData(connectionType, [
+							[{ json: { query } }],
+						]);
+
+						const response = (await callMethodAsync.call(target, {
+							executeFunctions,
+							connectionType,
+							currentNodeRunIndex: index,
+							method: target[prop] as (
+								...args: MethodArgs
+							) => Promise<number[]>,
+							arguments: [query],
+						})) as number[];
+						logAiEvent(executeFunctions, 'ai-query-embedded');
+						executeFunctions.addOutputData(connectionType, index, [
+							[{ json: { response } }],
+						]);
+						return response;
+					};
+				}
+			}
+
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any
+			return (target as Record<string, unknown>)[prop as string] as any;
+		},
+	});
 }
 
 // Custom LangChain Embeddings implementation for Upstage Solar
@@ -197,14 +312,14 @@ class UpstageEmbeddings extends Embeddings {
 				throw new Error(`Upstage API error: ${response.status} - ${errorBody}`);
 			}
 
-			const data: any = await response.json();
+			const data = (await response.json()) as EmbeddingAPIResponse;
 
 			if (!data.data || !Array.isArray(data.data)) {
 				throw new Error('Invalid response format from Upstage API');
 			}
 
 			// Sort by index to ensure correct order
-			const sortedData = data.data.sort((a: any, b: any) => a.index - b.index);
+			const sortedData = data.data.sort((a, b) => a.index - b.index);
 
 			// Ensure we return the same number of embeddings as input texts
 			if (sortedData.length !== cleanInput.length) {
@@ -213,7 +328,7 @@ class UpstageEmbeddings extends Embeddings {
 				);
 			}
 
-			return sortedData.map((item: any) => item.embedding);
+			return sortedData.map(item => item.embedding);
 		} catch (error) {
 			throw new Error(
 				`Failed to generate embeddings: ${error instanceof Error ? error.message : String(error)}`

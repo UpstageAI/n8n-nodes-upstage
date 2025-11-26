@@ -20,8 +20,9 @@ import {
 	NodeError,
 	NodeOperationError,
 } from 'n8n-workflow';
+import { logAiEvent } from './telemetry';
 
-type TokensUsageParser = (llmOutput: LLMResult['llmOutput']) => {
+export type TokensUsageParser = (llmOutput: LLMResult['llmOutput']) => {
 	completionTokens: number;
 	promptTokens: number;
 	totalTokens: number;
@@ -99,12 +100,6 @@ export class N8nLlmTracing extends BaseCallbackHandler {
 		return encodedListLength.reduce((acc, curr) => acc + curr, 0);
 	}
 
-	// Placeholder for logAiEvent - community nodes don't have access to this utility
-	private logAiEvent(eventName: string, data: any) {
-		// In community nodes, we can only log to console
-		console.log(`🔍 AI Event: ${eventName}`, JSON.stringify(data, null, 2));
-	}
-
 	async handleLLMEnd(output: LLMResult, runId: string) {
 		// The fallback should never happen since handleLLMStart should always set the run details
 		// but just in case, we set the index to the length of the runsMap
@@ -162,7 +157,7 @@ export class N8nLlmTracing extends BaseCallbackHandler {
 			[[{ json: { ...response } }]]
 		);
 
-		this.logAiEvent('ai-llm-generated-output', {
+		logAiEvent(this.executionFunctions, 'ai-llm-generated-output', {
 			messages: parsedMessages,
 			options: runDetails.options,
 			response,
@@ -245,7 +240,7 @@ export class N8nLlmTracing extends BaseCallbackHandler {
 			);
 		}
 
-		this.logAiEvent('ai-llm-errored', {
+		logAiEvent(this.executionFunctions, 'ai-llm-errored', {
 			error: Object.keys(error).length === 0 ? error.toString() : error,
 			runId,
 			parentRunId,
