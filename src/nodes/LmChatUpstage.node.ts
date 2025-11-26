@@ -4,7 +4,27 @@ import type {
 	INodeTypeDescription,
 	INodeExecutionData,
 	IHttpRequestOptions,
+	IDataObject,
 } from 'n8n-workflow';
+import { handleNodeError } from '../utils/errorHandling';
+
+interface ChatMessage {
+	role: 'system' | 'user' | 'assistant';
+	content: string;
+}
+
+interface ChatRequestBody extends IDataObject {
+	model: string;
+	messages: ChatMessage[];
+	temperature?: number;
+	max_tokens?: number;
+	top_p?: number;
+	stream?: boolean;
+	reasoning_effort?: string;
+	frequency_penalty?: number;
+	presence_penalty?: number;
+	response_format?: IDataObject;
+}
 
 export class LmChatUpstage implements INodeType {
 	description: INodeTypeDescription = {
@@ -146,7 +166,8 @@ export class LmChatUpstage implements INodeType {
 						name: 'stream',
 						type: 'boolean',
 						default: false,
-						description: 'Whether to stream the response',
+						description:
+							'Whether to stream the response. Note: Streaming is not fully supported in n8n community nodes and will be processed as non-streaming.',
 					},
 					{
 						displayName: 'Reasoning Effort',
@@ -246,7 +267,7 @@ export class LmChatUpstage implements INodeType {
 		for (let i = 0; i < items.length; i++) {
 			try {
 				const model = this.getNodeParameter('model', i) as string;
-				const messages = this.getNodeParameter(
+				const messagesRaw = this.getNodeParameter(
 					'messages.message',
 					i,
 					[]
@@ -267,14 +288,15 @@ export class LmChatUpstage implements INodeType {
 				};
 
 				// Validate messages array
-				if (!messages || messages.length === 0) {
+				if (!messagesRaw || messagesRaw.length === 0) {
 					throw new Error(
 						'At least one message is required for chat completion'
 					);
 				}
 
-				// Validate message content
-				for (const message of messages) {
+				// Validate message content and convert to ChatMessage[]
+				const messages: ChatMessage[] = [];
+				for (const message of messagesRaw) {
 					if (!message.content || message.content.trim() === '') {
 						throw new Error('All messages must have non-empty content');
 					}
@@ -283,13 +305,23 @@ export class LmChatUpstage implements INodeType {
 							`Invalid message role: ${message.role}. Must be 'system', 'user', or 'assistant'`
 						);
 					}
+					messages.push({
+						role: message.role as 'system' | 'user' | 'assistant',
+						content: message.content,
+					});
 				}
 
 				// Build request body
-				const requestBody: any = {
+				const requestBody: ChatRequestBody = {
 					model,
 					messages,
-					...options,
+					temperature: options.temperature,
+					max_tokens: options.max_tokens,
+					top_p: options.top_p,
+					stream: options.stream,
+					reasoning_effort: options.reasoning_effort,
+					frequency_penalty: options.frequency_penalty,
+					presence_penalty: options.presence_penalty,
 				};
 
 				// Handle response_format properly
@@ -333,54 +365,30 @@ export class LmChatUpstage implements INodeType {
 				);
 
 				// Handle streaming vs non-streaming response
+				// Note: n8n's httpRequestWithAuthentication does not support streaming responses.
+				// When streaming is requested, we process the response as non-streaming.
 				if (options.stream) {
-					// For streaming, we'd need to handle the stream properly
-					// For now, return the full response
-					returnData.push({
-						json: response,
-						pairedItem: { item: i },
-					});
-				} else {
-					// Extract the assistant's message
-					const choice = response.choices?.[0];
-					const content = choice?.message?.content || '';
-
-					returnData.push({
-						json: {
-							content,
-							usage: response.usage,
-							model: response.model,
-							created: response.created,
-							full_response: response,
-						},
-						pairedItem: { item: i },
-					});
-				}
-			} catch (error) {
-				const errorMessage =
-					error instanceof Error ? error.message : 'Unknown error';
-
-				// Log detailed error information
-				console.error('🚫 Upstage Solar LLM Error:', {
-					error: errorMessage,
-					itemIndex: i,
-					timestamp: new Date().toISOString(),
-				});
-
-				if (this.continueOnFail()) {
-					returnData.push({
-						json: {
-							error: errorMessage,
-							error_code: (error as any)?.code || 'unknown_error',
-							timestamp: new Date().toISOString(),
-						},
-						pairedItem: { item: i },
-					});
-				} else {
-					throw new Error(
-						`Upstage Solar LLM failed for item ${i}: ${errorMessage}`
+					this.logger.warn(
+						'Streaming is not fully supported in n8n community nodes. Processing response as non-streaming.'
 					);
 				}
+
+				// Extract the assistant's message
+				const choice = response.choices?.[0];
+				const content = choice?.message?.content || '';
+
+				returnData.push({
+					json: {
+						content,
+						usage: response.usage,
+						model: response.model,
+						created: response.created,
+						full_response: response,
+					},
+					pairedItem: { item: i },
+				});
+			} catch (error) {
+				handleNodeError(this, error, i, 'Upstage Solar LLM', returnData);
 			}
 		}
 

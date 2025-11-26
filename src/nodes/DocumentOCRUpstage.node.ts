@@ -4,13 +4,17 @@ import type {
 	INodeTypeDescription,
 	INodeExecutionData,
 	IHttpRequestOptions,
+	JsonObject,
 } from 'n8n-workflow';
-
-// Response type definitions
-interface DocumentOCRResponse {
-	text?: string;
-	pages?: any[];
-}
+import { handleNodeError } from '../utils/errorHandling';
+import {
+	validateFileSize,
+	validateFileSizeFromMetadata,
+} from '../utils/fileValidation';
+import {
+	isDocumentOCRResponse,
+	type DocumentOCRResponse,
+} from '../utils/typeGuards';
 
 // Helper function to create multipart/form-data without external dependencies
 function createMultipartFormData(
@@ -141,19 +145,16 @@ export class DocumentOCRUpstage implements INodeType {
 
 				const binaryData = item.binary[binaryPropertyName];
 
-				// Validate file size (50MB limit)
-				if (
-					binaryData.fileSize &&
-					typeof binaryData.fileSize === 'number' &&
-					binaryData.fileSize > 50 * 1024 * 1024
-				) {
-					throw new Error('File size exceeds 50MB limit');
-				}
+				// Validate file size (50MB limit) - check metadata first if available
+				validateFileSizeFromMetadata(binaryData.fileSize, 50);
 
 				const buffer = await this.helpers.getBinaryDataBuffer(
 					i,
 					binaryPropertyName
 				);
+
+				// Validate file size from actual buffer
+				validateFileSize(buffer, 50);
 
 				// Prepare form fields
 				const fields: Record<string, string> = {
@@ -187,12 +188,12 @@ export class DocumentOCRUpstage implements INodeType {
 					requestOptions
 				);
 
-				const ocrResponse = response as DocumentOCRResponse;
-
-				// Validate response structure
-				if (!ocrResponse || typeof ocrResponse !== 'object') {
+				// Validate response structure using type guard
+				if (!isDocumentOCRResponse(response)) {
 					throw new Error('Invalid response format from Upstage OCR API');
 				}
+
+				const ocrResponse = response;
 
 				// Process response based on return mode
 				if (returnMode === 'text') {
@@ -208,7 +209,7 @@ export class DocumentOCRUpstage implements INodeType {
 				} else if (returnMode === 'words') {
 					// Extract all words from all pages
 					const allWords =
-						ocrResponse?.pages?.flatMap((page: any) => page.words || []) || [];
+						ocrResponse?.pages?.flatMap(page => page.words || []) || [];
 					returnData.push({
 						json: { words: allWords },
 						pairedItem: { item: i },
@@ -216,53 +217,21 @@ export class DocumentOCRUpstage implements INodeType {
 				} else if (returnMode === 'confidence') {
 					returnData.push({
 						json: {
-							confidence: (ocrResponse as any)?.confidence ?? 0,
-							modelVersion: (ocrResponse as any)?.modelVersion ?? '',
-							numBilledPages: (ocrResponse as any)?.numBilledPages ?? 0,
+							confidence: ocrResponse?.confidence ?? 0,
+							modelVersion: ocrResponse?.modelVersion ?? '',
+							numBilledPages: ocrResponse?.numBilledPages ?? 0,
 						},
 						pairedItem: { item: i },
 					});
 				} else {
 					// Full response
 					returnData.push({
-						json: ocrResponse as any,
+						json: ocrResponse as JsonObject,
 						pairedItem: { item: i },
 					});
 				}
 			} catch (error) {
-				const errorMessage =
-					error instanceof Error ? error.message : 'Unknown error';
-				const statusCode =
-					typeof error === 'object' &&
-					error !== null &&
-					'statusCode' in error &&
-					typeof error.statusCode === 'number'
-						? error.statusCode
-						: undefined;
-
-				// Log detailed error information
-				console.error('🚫 Upstage Document OCR Error:', {
-					error: errorMessage,
-					statusCode,
-					itemIndex: i,
-					timestamp: new Date().toISOString(),
-				});
-
-				if (this.continueOnFail()) {
-					returnData.push({
-						json: {
-							error: errorMessage,
-							statusCode,
-							error_code: (error as any)?.code || 'unknown_error',
-							timestamp: new Date().toISOString(),
-						},
-						pairedItem: { item: i },
-					});
-				} else {
-					throw new Error(
-						`Upstage Document OCR failed for item ${i}: ${errorMessage}`
-					);
-				}
+				handleNodeError(this, error, i, 'Upstage Document OCR', returnData);
 			}
 		}
 

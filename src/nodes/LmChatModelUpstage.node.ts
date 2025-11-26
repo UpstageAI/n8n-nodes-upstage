@@ -6,12 +6,30 @@ import {
 	type SupplyData,
 	type ILoadOptionsFunctions,
 	type INodePropertyOptions,
+	type IDataObject,
 } from 'n8n-workflow';
-
-import { N8nLlmTracing } from '../utils/N8nLlmTracing';
+import { N8nLlmTracing, type TokensUsageParser } from '../utils/N8nLlmTracing';
 import { makeN8nLlmFailedAttemptHandler } from '../utils/n8nLlmFailedAttemptHandler';
-import { getHttpProxyAgent } from '../utils/httpProxyAgent';
 import { getConnectionHintNoticeField } from '../utils/sharedFields';
+
+interface ModelOption {
+	id: string;
+	name?: string;
+	created?: number;
+}
+
+interface ModelListResponse {
+	data: ModelOption[];
+}
+
+interface ModelConfig extends IDataObject {
+	apiKey: string;
+	model: string;
+	configuration: IDataObject;
+	maxTokens?: number;
+	temperature?: number;
+	streaming?: boolean;
+}
 
 export class LmChatModelUpstage implements INodeType {
 	description: INodeTypeDescription = {
@@ -167,23 +185,29 @@ export class LmChatModelUpstage implements INodeType {
 					);
 
 					if (!response?.data || !Array.isArray(response.data)) {
-						console.warn('Invalid response format from models API:', response);
+						this.logger.warn('Invalid response format from models API');
 						return [{ name: 'solar-mini', value: 'solar-mini' }];
 					}
 
 					// Filter for Solar models only, remove duplicates, and sort by version/date (latest first)
-					const solarModels = response.data
-						.filter((model: any) => model?.id?.toLowerCase().includes('solar'))
-						.map((model: any) => ({
+					const modelResponse = response as ModelListResponse;
+					const solarModels = modelResponse.data
+						.filter((model: ModelOption) =>
+							model?.id?.toLowerCase().includes('solar')
+						)
+						.map((model: ModelOption) => ({
 							name: model.id,
 							value: model.id,
 							...model,
 						}))
 						.filter(
-							(model: any, index: number, self: any[]) =>
-								self.findIndex(m => m.value === model.value) === index
+							(
+								model: INodePropertyOptions,
+								index: number,
+								self: INodePropertyOptions[]
+							) => self.findIndex(m => m.value === model.value) === index
 						)
-						.sort((a: any, b: any) => {
+						.sort((a: INodePropertyOptions, b: INodePropertyOptions) => {
 							const extractVersionInfo = (name: string) => {
 								const dateMatch = name.match(/(\d{6})$/);
 								if (dateMatch) {
@@ -257,13 +281,13 @@ export class LmChatModelUpstage implements INodeType {
 						});
 
 					if (solarModels.length === 0) {
-						console.warn('No Solar models found in API response');
+						this.logger.warn('No Solar models found in API response');
 						return [{ name: 'solar-mini', value: 'solar-mini' }];
 					}
 
 					return solarModels;
 				} catch (error) {
-					console.error('Error fetching models:', error);
+					this.logger.error('Error fetching models', { error });
 					return [{ name: 'solar-mini', value: 'solar-mini' }];
 				}
 			},
@@ -295,8 +319,10 @@ export class LmChatModelUpstage implements INodeType {
 
 				if (response?.data && Array.isArray(response.data)) {
 					const solarModels = response.data
-						.filter((model: any) => model?.id?.toLowerCase().includes('solar'))
-						.map((model: any) => model.id)
+						.filter((model: ModelOption) =>
+							model?.id?.toLowerCase().includes('solar')
+						)
+						.map((model: ModelOption) => model.id)
 						.sort((a: string, b: string) => {
 							const extractVersionInfo = (name: string) => {
 								const dateMatch = name.match(/(\d{6})$/);
@@ -372,14 +398,13 @@ export class LmChatModelUpstage implements INodeType {
 
 					if (solarModels.length > 0) {
 						modelName = solarModels[0];
-						console.log(`🔄 Auto-selected latest Solar model: ${modelName}`);
+						this.logger.debug(`Auto-selected latest Solar model: ${modelName}`);
 					}
 				}
 			} catch (error) {
-				console.warn(
-					'Failed to fetch models dynamically, using fallback:',
-					error
-				);
+				this.logger.warn('Failed to fetch models dynamically, using fallback', {
+					error,
+				});
 			}
 
 			if (!modelName) {
@@ -389,7 +414,7 @@ export class LmChatModelUpstage implements INodeType {
 					'solar-mini',
 				];
 				modelName = fallbackModels[0];
-				console.log(`🔄 Using fallback model: ${modelName}`);
+				this.logger.debug(`Using fallback model: ${modelName}`);
 			}
 		}
 
@@ -399,33 +424,53 @@ export class LmChatModelUpstage implements INodeType {
 			streaming?: boolean;
 		};
 
-		const modelKwargs = {};
-
 		const configuration = {
 			baseURL: 'https://api.upstage.ai/v1',
-			httpAgent: getHttpProxyAgent(), // Use n8n's proxy agent when available
+			// Note: Proxy configuration should be handled at the n8n instance level
+			// Users should configure proxy through n8n's global settings
 			defaultHeaders: {
 				'Content-Type': 'application/json',
 			},
 		};
 
-		const upstageTokensParser = (llmOutput: any) => {
-			const usage = llmOutput?.tokenUsage || llmOutput?.usage;
-			if (usage) {
+		const upstageTokensParser: TokensUsageParser = llmOutput => {
+			if (!llmOutput || typeof llmOutput !== 'object') {
+				return {
+					completionTokens: 0,
+					promptTokens: 0,
+					totalTokens: 0,
+				};
+			}
+			const llmOutputObj = llmOutput as Record<string, unknown>;
+			const usage = llmOutputObj?.tokenUsage || llmOutputObj?.usage;
+			if (usage && typeof usage === 'object') {
+				const usageObj = usage as Record<string, unknown>;
 				const completionTokens =
-					usage.completion_tokens || usage.completionTokens || 0;
-				const promptTokens = usage.prompt_tokens || usage.promptTokens || 0;
+					(typeof usageObj.completion_tokens === 'number'
+						? usageObj.completion_tokens
+						: 0) ||
+					(typeof usageObj.completionTokens === 'number'
+						? usageObj.completionTokens
+						: 0) ||
+					0;
+				const promptTokens =
+					(typeof usageObj.prompt_tokens === 'number'
+						? usageObj.prompt_tokens
+						: 0) ||
+					(typeof usageObj.promptTokens === 'number'
+						? usageObj.promptTokens
+						: 0) ||
+					0;
 				const totalTokens =
-					usage.total_tokens ||
-					usage.totalTokens ||
+					(typeof usageObj.total_tokens === 'number'
+						? usageObj.total_tokens
+						: 0) ||
+					(typeof usageObj.totalTokens === 'number'
+						? usageObj.totalTokens
+						: 0) ||
 					completionTokens + promptTokens;
 
-				console.log('🔍 Solar LLM Token Usage:', {
-					completionTokens,
-					promptTokens,
-					totalTokens,
-					rawUsage: usage,
-				});
+				// Token usage logging removed (use n8n logger in tracing if needed)
 
 				return {
 					completionTokens,
@@ -434,10 +479,7 @@ export class LmChatModelUpstage implements INodeType {
 				};
 			}
 
-			console.log(
-				'⚠️ No token usage data found in Solar LLM response:',
-				llmOutput
-			);
+			// No token usage data found (logging removed)
 			return {
 				completionTokens: 0,
 				promptTokens: 0,
@@ -451,10 +493,10 @@ export class LmChatModelUpstage implements INodeType {
 		});
 		const failureHandler = makeN8nLlmFailedAttemptHandler(this);
 
-		const modelConfig: any = {
+		const modelConfig: ModelConfig = {
 			apiKey: credentials.apiKey as string,
 			model: modelName, // Use 'model' instead of 'modelName' for better API compatibility
-			configuration,
+			configuration: configuration as IDataObject,
 			maxTokens: options.maxTokens,
 			temperature: options.temperature,
 			streaming: options.streaming || false,

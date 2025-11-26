@@ -5,6 +5,23 @@ import type {
 	INodeExecutionData,
 	IHttpRequestOptions,
 } from 'n8n-workflow';
+import { handleNodeError } from '../utils/errorHandling';
+import {
+	validateFileSize,
+	validateFileSizeFromMetadata,
+} from '../utils/fileValidation';
+
+interface ImageContent {
+	type: 'image_url';
+	image_url: {
+		url: string;
+	};
+}
+
+interface SchemaOption {
+	const: string;
+	description?: string;
+}
 
 export class DocumentClassificationUpstage implements INodeType {
 	description: INodeTypeDescription = {
@@ -170,7 +187,7 @@ export class DocumentClassificationUpstage implements INodeType {
 				}
 
 				// Prepare content array based on input type
-				let content: any[] = [];
+				let content: ImageContent[] = [];
 
 				if (inputType === 'binary') {
 					const binaryPropertyName = this.getNodeParameter(
@@ -186,10 +203,18 @@ export class DocumentClassificationUpstage implements INodeType {
 					}
 
 					const binaryData = item.binary[binaryPropertyName];
+
+					// Validate file size (50MB limit) - check metadata first if available
+					validateFileSizeFromMetadata(binaryData.fileSize, 50);
+
 					const buffer = await this.helpers.getBinaryDataBuffer(
 						i,
 						binaryPropertyName
 					);
+
+					// Validate file size from actual buffer
+					validateFileSize(buffer, 50);
+
 					const base64Data = buffer.toString('base64');
 
 					content = [
@@ -217,7 +242,7 @@ export class DocumentClassificationUpstage implements INodeType {
 				}
 
 				// Build the JSON schema from categories or raw JSON
-				let oneOf: any[];
+				let oneOf: SchemaOption[];
 
 				if (schemaInputType === 'form') {
 					// Use form input categories
@@ -301,14 +326,13 @@ export class DocumentClassificationUpstage implements INodeType {
 					});
 				}
 			} catch (error) {
-				if (this.continueOnFail()) {
-					returnData.push({
-						json: { error: (error as Error).message || 'Unknown error' },
-						pairedItem: { item: i },
-					});
-				} else {
-					throw error;
-				}
+				handleNodeError(
+					this,
+					error,
+					i,
+					'Upstage Document Classification',
+					returnData
+				);
 			}
 		}
 

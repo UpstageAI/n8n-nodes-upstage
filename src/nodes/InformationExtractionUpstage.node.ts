@@ -4,18 +4,44 @@ import type {
 	INodeTypeDescription,
 	INodeExecutionData,
 	IHttpRequestOptions,
+	IDataObject,
 } from 'n8n-workflow';
+import { handleNodeError } from '../utils/errorHandling';
+import {
+	validateFileSize,
+	validateFileSizeFromMetadata,
+} from '../utils/fileValidation';
+
+interface InformationExtractionMessage {
+	role: 'user';
+	content: Array<{
+		type: 'image_url';
+		image_url: { url: string };
+	}>;
+}
+
+interface InformationExtractionRequestBody {
+	model: string;
+	messages: InformationExtractionMessage[];
+	response_format?: IDataObject;
+	chunking?: {
+		pages_per_chunk: number;
+	};
+}
 
 export class InformationExtractionUpstage implements INodeType {
 	// JSON structure validation and fix method
-	private static validateAndFixJsonStructure(jsonString: string): string {
+	private static validateAndFixJsonStructure(
+		jsonString: string,
+		logger?: IExecuteFunctions['logger']
+	): string {
 		try {
-			console.log('=== JSON Structure Analysis ===');
-			console.log('Original length:', jsonString.length);
-			console.log(
-				'Last 20 chars:',
-				jsonString.substring(jsonString.length - 20)
-			);
+			if (logger) {
+				logger.debug('=== JSON Structure Analysis ===', {
+					originalLength: jsonString.length,
+					last20Chars: jsonString.substring(jsonString.length - 20),
+				});
+			}
 
 			// Step 1: Basic bracket balance check
 			const openBraces = (jsonString.match(/\{/g) || []).length;
@@ -23,9 +49,14 @@ export class InformationExtractionUpstage implements INodeType {
 			const openBrackets = (jsonString.match(/\[/g) || []).length;
 			const closeBrackets = (jsonString.match(/\]/g) || []).length;
 
-			console.log(
-				`Brace balance: {${openBraces}} {${closeBraces}}, [${openBrackets}] [${closeBrackets}]`
-			);
+			if (logger) {
+				logger.debug('Brace balance check', {
+					openBraces,
+					closeBraces,
+					openBrackets,
+					closeBrackets,
+				});
+			}
 
 			// Step 2: Structural analysis and modification
 			let fixedJson = jsonString;
@@ -33,11 +64,15 @@ export class InformationExtractionUpstage implements INodeType {
 			// Fix brace imbalance
 			if (openBraces > closeBraces) {
 				const missingBraces = openBraces - closeBraces;
-				console.log(`Adding ${missingBraces} missing closing braces`);
+				if (logger) {
+					logger.debug(`Adding ${missingBraces} missing closing braces`);
+				}
 				fixedJson += '}'.repeat(missingBraces);
 			} else if (closeBraces > openBraces) {
 				const extraBraces = closeBraces - openBraces;
-				console.log(`Removing ${extraBraces} extra closing braces`);
+				if (logger) {
+					logger.debug(`Removing ${extraBraces} extra closing braces`);
+				}
 				fixedJson = fixedJson.replace(
 					/\}+$/,
 					'}'.repeat(closeBraces - extraBraces)
@@ -47,11 +82,15 @@ export class InformationExtractionUpstage implements INodeType {
 			// Fix bracket imbalance
 			if (openBrackets > closeBrackets) {
 				const missingBrackets = openBrackets - closeBrackets;
-				console.log(`Adding ${missingBrackets} missing closing brackets`);
+				if (logger) {
+					logger.debug(`Adding ${missingBrackets} missing closing brackets`);
+				}
 				fixedJson += ']'.repeat(missingBrackets);
 			} else if (closeBrackets > openBrackets) {
 				const extraBrackets = closeBrackets - openBrackets;
-				console.log(`Removing ${extraBrackets} extra closing brackets`);
+				if (logger) {
+					logger.debug(`Removing ${extraBrackets} extra closing brackets`);
+				}
 				fixedJson = fixedJson.replace(
 					/\]+$/,
 					']'.repeat(closeBrackets - extraBrackets)
@@ -60,48 +99,69 @@ export class InformationExtractionUpstage implements INodeType {
 
 			// Step 3: JSON validation
 			try {
-				const parsed = JSON.parse(fixedJson);
-				console.log('JSON structure fixed successfully');
-				console.log('Fixed length:', fixedJson.length);
-				console.log(
-					'Last 20 chars after fix:',
-					fixedJson.substring(fixedJson.length - 20)
-				);
+				JSON.parse(fixedJson);
+				if (logger) {
+					logger.debug('JSON structure fixed successfully', {
+						fixedLength: fixedJson.length,
+						last20Chars: fixedJson.substring(fixedJson.length - 20),
+					});
+				}
 				return fixedJson;
 			} catch (parseError) {
-				console.log(
-					'Still invalid after basic fix:',
-					(parseError as Error).message
-				);
+				if (logger) {
+					logger.debug('Still invalid after basic fix', {
+						error: (parseError as Error).message,
+					});
+				}
 
 				// Step 4: Advanced modification attempt
-				fixedJson = InformationExtractionUpstage.advancedJsonFix(fixedJson);
+				fixedJson = InformationExtractionUpstage.advancedJsonFix(
+					fixedJson,
+					logger
+				);
 
 				// Step 5: Final validation
 				try {
 					JSON.parse(fixedJson);
-					console.log('Advanced fix successful');
+					if (logger) {
+						logger.debug('Advanced fix successful');
+					}
 					return fixedJson;
 				} catch (finalError) {
-					console.log('Advanced fix failed:', (finalError as Error).message);
+					if (logger) {
+						logger.debug('Advanced fix failed', {
+							error: (finalError as Error).message,
+						});
+					}
 					return jsonString; // Return original
 				}
 			}
 		} catch (error) {
-			console.log('Could not fix JSON structure:', (error as Error).message);
+			if (logger) {
+				logger.debug('Could not fix JSON structure', {
+					error: (error as Error).message,
+				});
+			}
 			return jsonString; // Return original
 		}
 	}
 
 	// Advanced JSON modification method
-	private static advancedJsonFix(jsonString: string): string {
-		console.log('=== Advanced JSON Fix ===');
+	private static advancedJsonFix(
+		jsonString: string,
+		logger?: IExecuteFunctions['logger']
+	): string {
+		if (logger) {
+			logger.debug('=== Advanced JSON Fix ===');
+		}
 
 		// Fix specific pattern: when properties object is not properly closed
 		// "properties":{...}}}} -> "properties":{...}}}}
 		const propertiesPattern = /("properties":\{[^}]*)\}\}\}\}/g;
 		if (propertiesPattern.test(jsonString)) {
-			console.log('Fixing properties object closure');
+			if (logger) {
+				logger.debug('Fixing properties object closure');
+			}
 			jsonString = jsonString.replace(propertiesPattern, '$1}}}');
 		}
 
@@ -110,7 +170,9 @@ export class InformationExtractionUpstage implements INodeType {
 		jsonString = jsonString.replace(/\}\}\}+/g, match => {
 			const count = match.length;
 			if (count > 2) {
-				console.log(`Reducing ${count} consecutive closing braces to 2`);
+				if (logger) {
+					logger.debug(`Reducing ${count} consecutive closing braces to 2`);
+				}
 				return '}}';
 			}
 			return match;
@@ -118,6 +180,53 @@ export class InformationExtractionUpstage implements INodeType {
 
 		return jsonString;
 	}
+
+	// Helper method to get image data URL or HTTP URL from binary or URL input
+	private static async getImageDataUrlOrHttp(
+		executeFunctions: IExecuteFunctions,
+		inputType: string,
+		itemIndex: number,
+		items: INodeExecutionData[]
+	): Promise<string> {
+		if (inputType === 'binary') {
+			const binaryPropertyName = executeFunctions.getNodeParameter(
+				'binaryPropertyName',
+				itemIndex
+			) as string;
+			const item = items[itemIndex];
+			if (!item.binary || !item.binary[binaryPropertyName]) {
+				throw new Error(
+					`No binary data found in property "${binaryPropertyName}".`
+				);
+			}
+			const binaryData = item.binary[binaryPropertyName];
+
+			// Validate file size (50MB limit) - check metadata first if available
+			validateFileSizeFromMetadata(binaryData.fileSize, 50);
+
+			const buffer = await executeFunctions.helpers.getBinaryDataBuffer(
+				itemIndex,
+				binaryPropertyName
+			);
+
+			// Validate file size from actual buffer
+			validateFileSize(buffer, 50);
+
+			const mime = binaryData.mimeType || 'application/octet-stream';
+			const base64 = buffer.toString('base64');
+			return `data:${mime};base64,${base64}`;
+		} else {
+			const imageUrl = executeFunctions.getNodeParameter(
+				'imageUrl',
+				itemIndex
+			) as string;
+			if (!imageUrl) {
+				throw new Error('Image URL is required.');
+			}
+			return imageUrl;
+		}
+	}
+
 	description: INodeTypeDescription = {
 		displayName: 'Upstage Information Extract',
 		name: 'informationExtractionUpstage',
@@ -299,14 +408,16 @@ export class InformationExtractionUpstage implements INodeType {
 					) as number;
 
 					// Schema parsing
-					let responseFormat: any;
+					let responseFormat: IDataObject | undefined;
 					let schemaName: string;
-					let schemaObj: any;
+					let schemaObj: IDataObject | undefined;
 
 					if (schemaInputType === 'schema') {
 						// Schema Only mode
 						schemaName = this.getNodeParameter('schemaName', i) as string;
-						const schemaRaw = this.getNodeParameter('json_schema', i);
+						const schemaRaw = this.getNodeParameter('json_schema', i) as
+							| string
+							| IDataObject;
 
 						try {
 							if (typeof schemaRaw === 'string') {
@@ -314,9 +425,9 @@ export class InformationExtractionUpstage implements INodeType {
 								const cleanedJson = schemaRaw
 									.trim()
 									.replace(/[\u200B-\u200D\uFEFF]/g, '');
-								schemaObj = JSON.parse(cleanedJson);
+								schemaObj = JSON.parse(cleanedJson) as IDataObject;
 							} else if (typeof schemaRaw === 'object' && schemaRaw !== null) {
-								schemaObj = schemaRaw;
+								schemaObj = schemaRaw as IDataObject;
 							} else {
 								throw new Error('Invalid schema data type');
 							}
@@ -338,7 +449,7 @@ export class InformationExtractionUpstage implements INodeType {
 						const fullResponseRaw = this.getNodeParameter(
 							'fullResponseFormat',
 							i
-						);
+						) as string | IDataObject;
 
 						try {
 							if (typeof fullResponseRaw === 'string') {
@@ -350,16 +461,16 @@ export class InformationExtractionUpstage implements INodeType {
 									.replace(/\r/g, '\n'); // Normalize Mac line breaks
 
 								// Step 2: JSON validation and format detection
-								let parsedJson;
+								let parsedJson: IDataObject;
 								try {
 									// First try parsing as original
-									parsedJson = JSON.parse(cleanedJson);
+									parsedJson = JSON.parse(cleanedJson) as IDataObject;
 								} catch (firstError) {
 									// If failed, consider as compressed JSON and do additional cleaning
-									console.log(
-										'First parse failed, trying compressed JSON cleaning...'
+									this.logger.debug(
+										'First parse failed, trying compressed JSON cleaning',
+										{ error: (firstError as Error).message }
 									);
-									console.log('Original error:', (firstError as Error).message);
 
 									cleanedJson = cleanedJson
 										.replace(/\n/g, '') // Remove all line breaks
@@ -371,10 +482,11 @@ export class InformationExtractionUpstage implements INodeType {
 									// Attempt JSON structure validation and modification
 									cleanedJson =
 										InformationExtractionUpstage.validateAndFixJsonStructure(
-											cleanedJson
+											cleanedJson,
+											this.logger
 										);
 
-									parsedJson = JSON.parse(cleanedJson);
+									parsedJson = JSON.parse(cleanedJson) as IDataObject;
 								}
 
 								// Step 3: JSON object validation
@@ -392,14 +504,15 @@ export class InformationExtractionUpstage implements INodeType {
 								responseFormat = parsedJson;
 
 								// Debug logging
-								console.log('JSON parsing successful');
-								console.log('Type:', parsedJson.type);
-								console.log('Schema name:', parsedJson.json_schema?.name);
+								this.logger.debug('JSON parsing successful', {
+									type: parsedJson.type,
+									hasSchema: !!parsedJson.json_schema,
+								});
 							} else if (
 								typeof fullResponseRaw === 'object' &&
 								fullResponseRaw !== null
 							) {
-								responseFormat = fullResponseRaw;
+								responseFormat = fullResponseRaw as IDataObject;
 							} else {
 								throw new Error('Invalid response format data type');
 							}
@@ -411,32 +524,15 @@ export class InformationExtractionUpstage implements INodeType {
 					}
 
 					// Compose messages
-					let dataUrlOrHttp: string;
-					if (inputType === 'binary') {
-						const binaryPropertyName = this.getNodeParameter(
-							'binaryPropertyName',
-							i
-						) as string;
-						const item = items[i];
-						if (!item.binary || !item.binary[binaryPropertyName]) {
-							throw new Error(
-								`No binary data found in property "${binaryPropertyName}".`
-							);
-						}
-						const binaryData = item.binary[binaryPropertyName];
-						const buffer = await this.helpers.getBinaryDataBuffer(
+					const dataUrlOrHttp =
+						await InformationExtractionUpstage.getImageDataUrlOrHttp(
+							this,
+							inputType,
 							i,
-							binaryPropertyName
+							items
 						);
-						const mime = binaryData.mimeType || 'application/octet-stream';
-						const base64 = buffer.toString('base64');
-						dataUrlOrHttp = `data:${mime};base64,${base64}`;
-					} else {
-						dataUrlOrHttp = this.getNodeParameter('imageUrl', i) as string;
-						if (!dataUrlOrHttp) throw new Error('Image URL is required.');
-					}
 
-					const requestBody: any = {
+					const requestBody: InformationExtractionRequestBody = {
 						model,
 						messages: [
 							{
@@ -476,7 +572,7 @@ export class InformationExtractionUpstage implements INodeType {
 					} else {
 						// Parse extracted JSON
 						const content = response?.choices?.[0]?.message?.content ?? '';
-						let extracted: any;
+						let extracted: IDataObject;
 						try {
 							extracted = content ? JSON.parse(content) : {};
 						} catch {
@@ -501,33 +597,21 @@ export class InformationExtractionUpstage implements INodeType {
 					)?.trim();
 
 					// Compose messages
-					let dataUrlOrHttp: string;
-					if (inputType === 'binary') {
-						const binaryPropertyName = this.getNodeParameter(
-							'binaryPropertyName',
-							i
-						) as string;
-						const item = items[i];
-						if (!item.binary || !item.binary[binaryPropertyName]) {
-							throw new Error(
-								`No binary data found in property "${binaryPropertyName}".`
-							);
-						}
-						const binaryData = item.binary[binaryPropertyName];
-						const buffer = await this.helpers.getBinaryDataBuffer(
+					const dataUrlOrHttp =
+						await InformationExtractionUpstage.getImageDataUrlOrHttp(
+							this,
+							inputType,
 							i,
-							binaryPropertyName
+							items
 						);
-						const mime = binaryData.mimeType || 'application/octet-stream';
-						const base64 = buffer.toString('base64');
-						dataUrlOrHttp = `data:${mime};base64,${base64}`;
-					} else {
-						dataUrlOrHttp = this.getNodeParameter('imageUrl', i) as string;
-						if (!dataUrlOrHttp) throw new Error('Image URL is required.');
-					}
 
 					// Compose messages
-					const messages: any[] = [];
+					const messages: Array<{
+						role: 'user';
+						content:
+							| string
+							| Array<{ type: 'image_url'; image_url: { url: string } }>;
+					}> = [];
 					if (prompt) {
 						messages.push({ role: 'user', content: prompt });
 					}
@@ -542,7 +626,15 @@ export class InformationExtractionUpstage implements INodeType {
 					});
 
 					// Request body
-					const requestBody: any = {
+					const requestBody: {
+						model: string;
+						messages: Array<{
+							role: 'user';
+							content:
+								| string
+								| Array<{ type: 'image_url'; image_url: { url: string } }>;
+						}>;
+					} = {
 						model,
 						messages,
 					};
@@ -572,7 +664,7 @@ export class InformationExtractionUpstage implements INodeType {
 						returnData.push(out);
 					} else {
 						const contentStr = response?.choices?.[0]?.message?.content ?? '';
-						let schemaObj: any;
+						let schemaObj: IDataObject;
 						try {
 							schemaObj = contentStr ? JSON.parse(contentStr) : {};
 						} catch {
@@ -594,14 +686,13 @@ export class InformationExtractionUpstage implements INodeType {
 					}
 				}
 			} catch (error) {
-				if (this.continueOnFail()) {
-					returnData.push({
-						json: { error: (error as Error).message || 'Unknown error' },
-						pairedItem: { item: i },
-					});
-				} else {
-					throw error;
-				}
+				handleNodeError(
+					this,
+					error,
+					i,
+					'Upstage Information Extraction',
+					returnData
+				);
 			}
 		}
 
