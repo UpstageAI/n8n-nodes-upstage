@@ -7,13 +7,49 @@ services:
       - .:/workspace
     command: >
       sh -c "
-        if [ ! -d dist ] || [ -z \"$$(ls -A dist 2>/dev/null)\" ]; then
-          echo 'Building n8n-nodes-upstage...' &&
-          npm ci &&
-          npm run build &&
-          echo 'Build completed successfully!'
+        build() {
+          echo '[Builder] Building...'
+          npm ci
+          npm run build
+          echo '[Builder] Build completed successfully!'
+        }
+        
+        save_hash() {
+          if command -v md5sum >/dev/null 2>&1; then
+            HASH=$$(find src package.json tsconfig.json -type f 2>/dev/null | sort | xargs md5sum 2>/dev/null | md5sum 2>/dev/null | cut -d' ' -f1 2>/dev/null || echo '')
+            if [ -n \"$$HASH\" ]; then
+              echo \"$$HASH\" > dist/.build-hash 2>/dev/null || true
+            fi
+          fi
+        }
+        
+        # Check if dist/index.js exists (required file)
+        if [ ! -f dist/index.js ]; then
+          build
+          save_hash
+          exit 0
+        fi
+        
+        # Compare source file hash with last build hash
+        NEEDS_REBUILD=false
+        if command -v md5sum >/dev/null 2>&1 && [ -f dist/.build-hash ]; then
+          CURRENT_HASH=$$(find src package.json tsconfig.json -type f 2>/dev/null | sort | xargs md5sum 2>/dev/null | md5sum 2>/dev/null | cut -d' ' -f1 2>/dev/null || echo '')
+          LAST_HASH=$$(cat dist/.build-hash 2>/dev/null || echo '')
+          if [ -n \"$$CURRENT_HASH\" ] && [ \"$$CURRENT_HASH\" != \"$$LAST_HASH\" ]; then
+            NEEDS_REBUILD=true
+          fi
         else
-          echo 'Build files already exist, skipping build...'
+          # Fallback: check if package.json or tsconfig.json is newer than dist/index.js
+          if [ package.json -nt dist/index.js ] 2>/dev/null || [ tsconfig.json -nt dist/index.js ] 2>/dev/null; then
+            NEEDS_REBUILD=true
+          fi
+        fi
+        
+        if [ \"$$NEEDS_REBUILD\" = \"true\" ]; then
+          build
+          save_hash
+        else
+          echo '[Builder] Dist files are up to date, skipping build.'
         fi
       "
     restart: "no"
@@ -43,16 +79,17 @@ services:
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
     entrypoint: >
       sh -c "
-        if [ ! -f /home/node/.n8n/custom/package.json ]; then
-          echo 'Installing n8n-nodes-upstage...' &&
-          mkdir -p /home/node/.n8n/custom &&
-          cp -r /tmp/n8n-nodes-upstage/* /home/node/.n8n/custom/ &&
-          cd /home/node/.n8n/custom &&
-          npm install --production --legacy-peer-deps &&
-          echo 'n8n-nodes-upstage installed successfully!'
+        if [ ! -f /home/node/.n8n/custom/package.json ] || [ /tmp/n8n-nodes-upstage/package.json -nt /home/node/.n8n/custom/package.json ] || [ \"$$(find /tmp/n8n-nodes-upstage/dist -type f -name '*.js' -newer /home/node/.n8n/custom/package.json 2>/dev/null | head -1)\" != \"\" ]; then
+          echo '[upstage] Installing/Updating n8n-nodes-upstage...'
+          mkdir -p /home/node/.n8n/custom
+          rm -rf /home/node/.n8n/custom/*
+          cp -r /tmp/n8n-nodes-upstage/* /home/node/.n8n/custom/
+          cd /home/node/.n8n/custom
+          npm install --production --legacy-peer-deps
+          echo '[upstage] n8n-nodes-upstage installed/updated successfully!'
         else
-          echo 'n8n-nodes-upstage already installed, skipping...'
-        fi &&
+          echo '[upstage] n8n-nodes-upstage is up to date, skipping reinstall.'
+        fi
         exec n8n start
       "
     restart: unless-stopped
