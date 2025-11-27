@@ -91,6 +91,7 @@
   "dependencies": {
     "@langchain/core": "^0.3.72",
     "@langchain/openai": "^0.6.9",
+    "@n8n/json-schema-to-zod": "^1.6.0",
     "https-proxy-agent": "^7.0.0"
   },
   "overrides": {
