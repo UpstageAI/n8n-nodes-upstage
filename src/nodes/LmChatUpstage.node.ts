@@ -8,9 +8,35 @@ import type {
 } from 'n8n-workflow';
 import { handleNodeError } from '../utils/errorHandling';
 
+interface ToolFunction {
+	name: string;
+	description: string;
+	parameters: {
+		type: 'object';
+		properties: Record<string, unknown>;
+		required?: string[];
+	};
+}
+
+interface Tool {
+	type: 'function';
+	function: ToolFunction;
+}
+
+interface ToolCall {
+	id: string;
+	type: 'function';
+	function: {
+		name: string;
+		arguments: string; // JSON string
+	};
+}
+
 interface ChatMessage {
-	role: 'system' | 'user' | 'assistant';
-	content: string;
+	role: 'system' | 'user' | 'assistant' | 'tool';
+	content: string | null;
+	tool_calls?: ToolCall[];
+	tool_call_id?: string; // tool role일 때
 }
 
 interface ChatRequestBody extends IDataObject {
@@ -24,6 +50,12 @@ interface ChatRequestBody extends IDataObject {
 	frequency_penalty?: number;
 	presence_penalty?: number;
 	response_format?: IDataObject;
+	tools?: Tool[];
+	tool_choice?:
+		| 'auto'
+		| 'none'
+		| 'required'
+		| { type: 'function'; function: { name: string } };
 }
 
 export class LmChatUpstage implements INodeType {
@@ -257,6 +289,96 @@ export class LmChatUpstage implements INodeType {
 					},
 				],
 			},
+			{
+				displayName: 'Tools',
+				name: 'tools',
+				type: 'fixedCollection',
+				typeOptions: {
+					multipleValues: true,
+				},
+				default: {},
+				placeholder: 'Add Tool',
+				description:
+					'A list of tools the model may call. Currently, only functions are supported as a tool.',
+				options: [
+					{
+						displayName: 'Tool',
+						name: 'tool',
+						values: [
+							{
+								displayName: 'Name',
+								name: 'name',
+								type: 'string',
+								required: true,
+								default: '',
+								description: 'The name of the function to be called',
+							},
+							{
+								displayName: 'Description',
+								name: 'description',
+								type: 'string',
+								required: true,
+								default: '',
+								description: 'A description of what the function does',
+							},
+							{
+								displayName: 'Parameters',
+								name: 'parameters',
+								type: 'json',
+								required: true,
+								description:
+									'The parameters the functions accepts, described as a JSON Schema object',
+								default: '{\n  "type": "object",\n  "properties": {}\n}',
+							},
+						],
+					},
+				],
+			},
+			{
+				displayName: 'Tool Choice',
+				name: 'tool_choice',
+				type: 'options',
+				options: [
+					{
+						name: 'Auto',
+						value: 'auto',
+						description:
+							'Model can pick between generating a message or calling a function',
+					},
+					{
+						name: 'None',
+						value: 'none',
+						description:
+							'Model will not call any function and instead generate a message',
+					},
+					{
+						name: 'Required',
+						value: 'required',
+						description: 'Model must call a function',
+					},
+					{
+						name: 'Specific Function',
+						value: 'specific',
+						description: 'Force the model to call a specific function',
+					},
+				],
+				default: 'auto',
+				description:
+					'Controls which (if any) function is called by the model. Only effective when tools are provided.',
+			},
+			{
+				displayName: 'Function Name',
+				name: 'function_name',
+				type: 'string',
+				default: '',
+				displayOptions: {
+					show: {
+						tool_choice: ['specific'],
+					},
+				},
+				description:
+					'The name of the function to call when tool_choice is "specific"',
+			},
 		],
 	};
 
@@ -286,6 +408,68 @@ export class LmChatUpstage implements INodeType {
 					response_format?: string;
 					json_schema?: string;
 				};
+
+				// Process tools parameter
+				const toolsRaw = this.getNodeParameter('tools.tool', i, []) as Array<{
+					name: string;
+					description: string;
+					parameters: string | IDataObject;
+				}>;
+
+				const tools: Tool[] = [];
+				if (toolsRaw && toolsRaw.length > 0) {
+					for (const toolRaw of toolsRaw) {
+						try {
+							const parameters =
+								typeof toolRaw.parameters === 'string'
+									? JSON.parse(toolRaw.parameters)
+									: toolRaw.parameters;
+
+							tools.push({
+								type: 'function',
+								function: {
+									name: toolRaw.name,
+									description: toolRaw.description,
+									parameters: parameters as {
+										type: 'object';
+										properties: Record<string, unknown>;
+										required?: string[];
+									},
+								},
+							});
+						} catch (error) {
+							throw new Error(
+								`Invalid tool parameters JSON: ${error instanceof Error ? error.message : String(error)}`
+							);
+						}
+					}
+				}
+
+				// Process tool_choice parameter
+				const toolChoiceRaw = this.getNodeParameter(
+					'tool_choice',
+					i,
+					'auto'
+				) as string;
+				let toolChoice: ChatRequestBody['tool_choice'] = 'auto';
+
+				if (toolChoiceRaw === 'specific') {
+					const functionName = this.getNodeParameter(
+						'function_name',
+						i
+					) as string;
+					if (!functionName) {
+						throw new Error(
+							'Function name is required when tool_choice is "specific"'
+						);
+					}
+					toolChoice = {
+						type: 'function',
+						function: { name: functionName },
+					};
+				} else {
+					toolChoice = toolChoiceRaw as 'auto' | 'none' | 'required';
+				}
 
 				// Validate messages array
 				if (!messagesRaw || messagesRaw.length === 0) {
@@ -323,6 +507,12 @@ export class LmChatUpstage implements INodeType {
 					frequency_penalty: options.frequency_penalty,
 					presence_penalty: options.presence_penalty,
 				};
+
+				// Add tools and tool_choice if tools are provided
+				if (tools.length > 0) {
+					requestBody.tools = tools;
+					requestBody.tool_choice = toolChoice;
+				}
 
 				// Handle response_format properly
 				if (options.response_format && options.response_format !== 'text') {
@@ -375,16 +565,39 @@ export class LmChatUpstage implements INodeType {
 
 				// Extract the assistant's message
 				const choice = response.choices?.[0];
-				const content = choice?.message?.content || '';
+				const message = choice?.message || {};
+				const content = message.content || '';
+				const toolCalls = message.tool_calls || [];
+
+				// Build response data
+				const responseData: IDataObject = {
+					content,
+					usage: response.usage,
+					model: response.model,
+					created: response.created,
+					full_response: response,
+				};
+
+				// Add tool_calls if present
+				if (toolCalls.length > 0) {
+					responseData.tool_calls = toolCalls.map((tc: ToolCall) => ({
+						id: tc.id,
+						type: tc.type,
+						function: {
+							name: tc.function.name,
+							arguments:
+								typeof tc.function.arguments === 'string'
+									? JSON.parse(tc.function.arguments)
+									: tc.function.arguments,
+						},
+					}));
+					responseData.has_tool_calls = true;
+				} else {
+					responseData.has_tool_calls = false;
+				}
 
 				returnData.push({
-					json: {
-						content,
-						usage: response.usage,
-						model: response.model,
-						created: response.created,
-						full_response: response,
-					},
+					json: responseData,
 					pairedItem: { item: i },
 				});
 			} catch (error) {

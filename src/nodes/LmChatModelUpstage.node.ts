@@ -1,4 +1,5 @@
 import { ChatOpenAI } from '@langchain/openai';
+import { DynamicStructuredTool } from '@langchain/core/tools';
 import {
 	type INodeType,
 	type INodeTypeDescription,
@@ -11,6 +12,8 @@ import {
 import { N8nLlmTracing, type TokensUsageParser } from '../utils/N8nLlmTracing';
 import { makeN8nLlmFailedAttemptHandler } from '../utils/n8nLlmFailedAttemptHandler';
 import { getConnectionHintNoticeField } from '../utils/sharedFields';
+import { jsonSchemaToZod } from '@n8n/json-schema-to-zod';
+import { compareModelNames } from '../utils/modelHelpers';
 
 interface ModelOption {
 	id: string;
@@ -161,6 +164,51 @@ export class LmChatModelUpstage implements INodeType {
 					},
 				],
 			},
+			{
+				displayName: 'Tools',
+				name: 'tools',
+				type: 'fixedCollection',
+				typeOptions: {
+					multipleValues: true,
+				},
+				default: {},
+				placeholder: 'Add Tool',
+				description:
+					'A list of tools the model may call. These tools will be bound to the model using LangChain bindTools.',
+				options: [
+					{
+						displayName: 'Tool',
+						name: 'tool',
+						values: [
+							{
+								displayName: 'Name',
+								name: 'name',
+								type: 'string',
+								required: true,
+								default: '',
+								description: 'The name of the function to be called',
+							},
+							{
+								displayName: 'Description',
+								name: 'description',
+								type: 'string',
+								required: true,
+								default: '',
+								description: 'A description of what the function does',
+							},
+							{
+								displayName: 'Parameters',
+								name: 'parameters',
+								type: 'json',
+								required: true,
+								description:
+									'The parameters the functions accepts, described as a JSON Schema object',
+								default: '{\n  "type": "object",\n  "properties": {}\n}',
+							},
+						],
+					},
+				],
+			},
 		],
 	};
 
@@ -207,78 +255,9 @@ export class LmChatModelUpstage implements INodeType {
 								self: INodePropertyOptions[]
 							) => self.findIndex(m => m.value === model.value) === index
 						)
-						.sort((a: INodePropertyOptions, b: INodePropertyOptions) => {
-							const extractVersionInfo = (name: string) => {
-								const dateMatch = name.match(/(\d{6})$/);
-								if (dateMatch) {
-									const dateStr = dateMatch[1];
-									const year = 2000 + parseInt(dateStr.substring(0, 2));
-									const month = parseInt(dateStr.substring(2, 4));
-									const day = parseInt(dateStr.substring(4, 6));
-									return {
-										hasDate: true,
-										date: new Date(year, month - 1, day).getTime(),
-										name: name.replace(`-${dateStr}`, ''),
-									};
-								}
-
-								const versionMatch = name.match(/v?(\d+)\.?(\d+)?/);
-								if (versionMatch) {
-									const major = parseInt(versionMatch[1]);
-									const minor = parseInt(versionMatch[2] || '0');
-									return {
-										hasVersion: true,
-										version: major * 1000 + minor,
-										name: name.replace(versionMatch[0], ''),
-									};
-								}
-
-								return { name };
-							};
-
-							const infoA = extractVersionInfo(a.name);
-							const infoB = extractVersionInfo(b.name);
-
-							if (infoA.hasDate && infoB.hasDate) {
-								return infoB.date! - infoA.date!;
-							}
-
-							if (infoA.hasVersion && infoB.hasVersion) {
-								return infoB.version! - infoA.version!;
-							}
-
-							if (
-								(infoA.hasDate || infoA.hasVersion) &&
-								!(infoB.hasDate || infoB.hasVersion)
-							) {
-								return -1;
-							}
-							if (
-								(infoB.hasDate || infoB.hasVersion) &&
-								!(infoA.hasDate || infoA.hasVersion)
-							) {
-								return 1;
-							}
-
-							if (infoA.name === infoB.name) {
-								const getTierPriority = (name: string) => {
-									if (name.includes('pro2')) return 4;
-									if (name.includes('pro') && !name.includes('pro2')) return 3;
-									if (name.includes('solar-1')) return 2;
-									if (name.includes('mini')) return 1;
-									return 0;
-								};
-
-								const priorityA = getTierPriority(a.name);
-								const priorityB = getTierPriority(b.name);
-
-								if (priorityA !== priorityB) {
-									return priorityB - priorityA;
-								}
-							}
-
-							return b.name.localeCompare(a.name);
-						});
+						.sort((a: INodePropertyOptions, b: INodePropertyOptions) =>
+							compareModelNames(a.name, b.name)
+						);
 
 					if (solarModels.length === 0) {
 						this.logger.warn('No Solar models found in API response');
@@ -323,78 +302,7 @@ export class LmChatModelUpstage implements INodeType {
 							model?.id?.toLowerCase().includes('solar')
 						)
 						.map((model: ModelOption) => model.id)
-						.sort((a: string, b: string) => {
-							const extractVersionInfo = (name: string) => {
-								const dateMatch = name.match(/(\d{6})$/);
-								if (dateMatch) {
-									const dateStr = dateMatch[1];
-									const year = 2000 + parseInt(dateStr.substring(0, 2));
-									const month = parseInt(dateStr.substring(2, 4));
-									const day = parseInt(dateStr.substring(4, 6));
-									return {
-										hasDate: true,
-										date: new Date(year, month - 1, day).getTime(),
-										name: name.replace(`-${dateStr}`, ''),
-									};
-								}
-
-								const versionMatch = name.match(/v?(\d+)\.?(\d+)?/);
-								if (versionMatch) {
-									const major = parseInt(versionMatch[1]);
-									const minor = parseInt(versionMatch[2] || '0');
-									return {
-										hasVersion: true,
-										version: major * 1000 + minor,
-										name: name.replace(versionMatch[0], ''),
-									};
-								}
-
-								return { name };
-							};
-
-							const infoA = extractVersionInfo(a);
-							const infoB = extractVersionInfo(b);
-
-							if (infoA.hasDate && infoB.hasDate) {
-								return infoB.date! - infoA.date!;
-							}
-
-							if (infoA.hasVersion && infoB.hasVersion) {
-								return infoB.version! - infoA.version!;
-							}
-
-							if (
-								(infoA.hasDate || infoA.hasVersion) &&
-								!(infoB.hasDate || infoB.hasVersion)
-							) {
-								return -1;
-							}
-							if (
-								(infoB.hasDate || infoB.hasVersion) &&
-								!(infoA.hasDate || infoA.hasVersion)
-							) {
-								return 1;
-							}
-
-							if (infoA.name === infoB.name) {
-								const getTierPriority = (name: string) => {
-									if (name.includes('pro2')) return 4;
-									if (name.includes('pro') && !name.includes('pro2')) return 3;
-									if (name.includes('solar-1')) return 2;
-									if (name.includes('mini')) return 1;
-									return 0;
-								};
-
-								const priorityA = getTierPriority(a);
-								const priorityB = getTierPriority(b);
-
-								if (priorityA !== priorityB) {
-									return priorityB - priorityA;
-								}
-							}
-
-							return b.localeCompare(a);
-						});
+						.sort(compareModelNames);
 
 					if (solarModels.length > 0) {
 						modelName = solarModels[0];
@@ -513,6 +421,59 @@ export class LmChatModelUpstage implements INodeType {
 		}
 
 		const model = new ChatOpenAI(modelConfig);
+
+		// Process tools parameter for Function Calling
+		const toolsRaw = this.getNodeParameter(
+			'tools.tool',
+			itemIndex,
+			[]
+		) as Array<{
+			name: string;
+			description: string;
+			parameters: string | IDataObject;
+		}>;
+
+		// If tools are provided, bind them to the model
+		if (toolsRaw && toolsRaw.length > 0) {
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const langChainTools: any[] = [];
+
+			for (const toolRaw of toolsRaw) {
+				try {
+					const parameters =
+						typeof toolRaw.parameters === 'string'
+							? JSON.parse(toolRaw.parameters)
+							: toolRaw.parameters;
+
+					// Convert JSON Schema to Zod schema
+					const zodSchema = jsonSchemaToZod(parameters as any);
+
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					const tool = new DynamicStructuredTool({
+						name: toolRaw.name,
+						description: toolRaw.description,
+						schema: zodSchema as any,
+						func: async (input: any) => {
+							// Actual function execution is handled by the AI Agent node
+							// This is just a placeholder that returns the input as JSON
+							return JSON.stringify(input);
+						},
+					}) as any;
+
+					langChainTools.push(tool);
+				} catch (error) {
+					throw new Error(
+						`Invalid tool parameters JSON for tool "${toolRaw.name}": ${error instanceof Error ? error.message : String(error)}`
+					);
+				}
+			}
+
+			// Bind tools to the model using LangChain's bindTools
+			// Type assertion needed due to LangChain's complex generic types
+			return {
+				response: model.bindTools(langChainTools),
+			};
+		}
 
 		return {
 			response: model,
