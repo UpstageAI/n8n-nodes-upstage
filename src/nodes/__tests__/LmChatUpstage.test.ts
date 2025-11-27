@@ -5,14 +5,19 @@ describe('LmChatUpstage', () => {
 	let node: LmChatUpstage;
 	let mockExecuteFunctions: IExecuteFunctions;
 
+	let mockHttpRequest: jest.Mock;
+
 	beforeEach(() => {
 		node = new LmChatUpstage();
+		mockHttpRequest = jest.fn();
 		mockExecuteFunctions = {
 			getInputData: jest.fn(),
 			getNodeParameter: jest.fn(),
 			getCredentials: jest.fn(),
 			helpers: {
-				httpRequestWithAuthentication: jest.fn(),
+				httpRequestWithAuthentication: {
+					call: mockHttpRequest,
+				},
 			},
 			getNode: jest.fn(() => ({
 				name: 'test-node',
@@ -22,6 +27,7 @@ describe('LmChatUpstage', () => {
 			logger: {
 				error: jest.fn(),
 				debug: jest.fn(),
+				warn: jest.fn(),
 			},
 		} as unknown as IExecuteFunctions;
 	});
@@ -137,9 +143,7 @@ describe('LmChatUpstage', () => {
 			(mockExecuteFunctions.getCredentials as jest.Mock).mockResolvedValue({
 				apiKey: 'test-key',
 			});
-			(
-				mockExecuteFunctions.helpers.httpRequestWithAuthentication as jest.Mock
-			).mockResolvedValue(mockResponse);
+			mockHttpRequest.mockResolvedValue(mockResponse);
 
 			const result = await node.execute.call(mockExecuteFunctions);
 
@@ -165,15 +169,235 @@ describe('LmChatUpstage', () => {
 			(mockExecuteFunctions.getCredentials as jest.Mock).mockResolvedValue({
 				apiKey: 'test-key',
 			});
-			(
-				mockExecuteFunctions.helpers.httpRequestWithAuthentication as jest.Mock
-			).mockRejectedValue(new Error('API Error'));
+			mockHttpRequest.mockRejectedValue(new Error('API Error'));
 
 			const result = await node.execute.call(mockExecuteFunctions);
 
 			expect(result).toBeDefined();
 			expect(result[0]).toBeDefined();
 			expect(result[0][0].json.error).toBeDefined();
+		});
+
+		describe('Function Calling', () => {
+			it('should include tools in request when provided', async () => {
+				const mockResponse = {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: null,
+								tool_calls: [
+									{
+										id: 'call_123',
+										type: 'function',
+										function: {
+											name: 'get_weather',
+											arguments: '{"location": "Seoul"}',
+										},
+									},
+								],
+							},
+						},
+					],
+					usage: { prompt_tokens: 10, completion_tokens: 5 },
+					model: 'solar-mini',
+					created: 1234567890,
+				};
+
+				(mockExecuteFunctions.getInputData as jest.Mock).mockReturnValue([
+					{ json: {} },
+				]);
+				(mockExecuteFunctions.getNodeParameter as jest.Mock).mockImplementation(
+					(param: string) => {
+						if (param === 'model') return 'solar-mini';
+						if (param === 'messages.message')
+							return [{ role: 'user', content: 'What is the weather?' }];
+						if (param === 'options') return {};
+						if (param === 'tools.tool')
+							return [
+								{
+									name: 'get_weather',
+									description: 'Get weather information',
+									parameters:
+										'{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}',
+								},
+							];
+						if (param === 'tool_choice') return 'auto';
+						return undefined;
+					}
+				);
+				(mockExecuteFunctions.getCredentials as jest.Mock).mockResolvedValue({
+					apiKey: 'test-key',
+				});
+				mockHttpRequest.mockResolvedValue(mockResponse);
+
+				await node.execute.call(mockExecuteFunctions);
+
+				expect(mockHttpRequest).toHaveBeenCalled();
+				const callArgs = mockHttpRequest.mock.calls[0];
+				const requestBody = callArgs[2].body;
+
+				expect(requestBody.tools).toBeDefined();
+				expect(requestBody.tools).toHaveLength(1);
+				expect(requestBody.tools[0].function.name).toBe('get_weather');
+				expect(requestBody.tool_choice).toBe('auto');
+			});
+
+			it('should handle tool_calls in response', async () => {
+				const mockResponse = {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: null,
+								tool_calls: [
+									{
+										id: 'call_123',
+										type: 'function',
+										function: {
+											name: 'get_weather',
+											arguments: '{"location": "Seoul"}',
+										},
+									},
+								],
+							},
+						},
+					],
+					usage: { prompt_tokens: 10, completion_tokens: 5 },
+					model: 'solar-mini',
+					created: 1234567890,
+				};
+
+				(mockExecuteFunctions.getInputData as jest.Mock).mockReturnValue([
+					{ json: {} },
+				]);
+				(mockExecuteFunctions.getNodeParameter as jest.Mock).mockImplementation(
+					(param: string) => {
+						if (param === 'model') return 'solar-mini';
+						if (param === 'messages.message')
+							return [{ role: 'user', content: 'What is the weather?' }];
+						if (param === 'options') return {};
+						if (param === 'tools.tool')
+							return [
+								{
+									name: 'get_weather',
+									description: 'Get weather information',
+									parameters:
+										'{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}',
+								},
+							];
+						if (param === 'tool_choice') return 'auto';
+						return undefined;
+					}
+				);
+				(mockExecuteFunctions.getCredentials as jest.Mock).mockResolvedValue({
+					apiKey: 'test-key',
+				});
+				mockHttpRequest.mockResolvedValue(mockResponse);
+
+				const result = await node.execute.call(mockExecuteFunctions);
+
+				expect(result[0][0].json.tool_calls).toBeDefined();
+				const toolCalls = result[0][0].json.tool_calls as Array<{
+					function: { name: string };
+				}>;
+				expect(toolCalls).toHaveLength(1);
+				expect(toolCalls[0].function.name).toBe('get_weather');
+				expect(result[0][0].json.has_tool_calls).toBe(true);
+			});
+
+			it('should handle specific tool_choice', async () => {
+				const mockResponse = {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: null,
+								tool_calls: [
+									{
+										id: 'call_123',
+										type: 'function',
+										function: {
+											name: 'get_weather',
+											arguments: '{"location": "Seoul"}',
+										},
+									},
+								],
+							},
+						},
+					],
+					usage: { prompt_tokens: 10, completion_tokens: 5 },
+					model: 'solar-mini',
+					created: 1234567890,
+				};
+
+				(mockExecuteFunctions.getInputData as jest.Mock).mockReturnValue([
+					{ json: {} },
+				]);
+				(mockExecuteFunctions.getNodeParameter as jest.Mock).mockImplementation(
+					(param: string) => {
+						if (param === 'model') return 'solar-mini';
+						if (param === 'messages.message')
+							return [{ role: 'user', content: 'What is the weather?' }];
+						if (param === 'options') return {};
+						if (param === 'tools.tool')
+							return [
+								{
+									name: 'get_weather',
+									description: 'Get weather information',
+									parameters:
+										'{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}',
+								},
+							];
+						if (param === 'tool_choice') return 'specific';
+						if (param === 'function_name') return 'get_weather';
+						return undefined;
+					}
+				);
+				(mockExecuteFunctions.getCredentials as jest.Mock).mockResolvedValue({
+					apiKey: 'test-key',
+				});
+				mockHttpRequest.mockResolvedValue(mockResponse);
+
+				await node.execute.call(mockExecuteFunctions);
+
+				expect(mockHttpRequest).toHaveBeenCalled();
+				const callArgs = mockHttpRequest.mock.calls[0];
+				const requestBody = callArgs[2].body;
+
+				expect(requestBody.tool_choice).toEqual({
+					type: 'function',
+					function: { name: 'get_weather' },
+				});
+			});
+
+			it('should throw error for invalid tool parameters JSON', async () => {
+				(mockExecuteFunctions.getInputData as jest.Mock).mockReturnValue([
+					{ json: {} },
+				]);
+				(mockExecuteFunctions.getNodeParameter as jest.Mock).mockImplementation(
+					(param: string) => {
+						if (param === 'model') return 'solar-mini';
+						if (param === 'messages.message')
+							return [{ role: 'user', content: 'Hello' }];
+						if (param === 'options') return {};
+						if (param === 'tools.tool')
+							return [
+								{
+									name: 'get_weather',
+									description: 'Get weather information',
+									parameters: 'invalid json',
+								},
+							];
+						if (param === 'tool_choice') return 'auto';
+						return undefined;
+					}
+				);
+
+				await expect(node.execute.call(mockExecuteFunctions)).rejects.toThrow(
+					'Invalid tool parameters JSON'
+				);
+			});
 		});
 	});
 });
