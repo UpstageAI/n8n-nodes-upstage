@@ -251,133 +251,169 @@ export class LmChatUpstage implements INodeType {
 					{
 						displayName: 'Response Format',
 						name: 'response_format',
-						type: 'options',
-						options: [
-							{
-								name: 'Text (Default)',
-								value: 'text',
-								description: 'Standard text response',
-							},
-							{
-								name: 'JSON Object',
-								value: 'json_object',
-								description: 'Generate JSON object (requires "JSON" in prompt)',
-							},
-							{
-								name: 'JSON Schema',
-								value: 'json_schema',
-								description:
-									'Generate JSON with custom schema (structured outputs)',
-							},
-						],
-						default: 'text',
+						type: 'fixedCollection',
+						default: {},
 						description:
 							'Format for model output. JSON formats only work with solar-pro2 model.',
+						options: [
+							{
+								displayName: 'Response Format',
+								name: 'values',
+								values: [
+									{
+										displayName: 'Format',
+										name: 'format',
+										type: 'options',
+										options: [
+											{
+												name: 'Text (Default)',
+												value: 'text',
+												description: 'Standard text response',
+											},
+											{
+												name: 'JSON Object',
+												value: 'json_object',
+												description:
+													'Generate JSON object (requires "JSON" in prompt)',
+											},
+											{
+												name: 'JSON Schema',
+												value: 'json_schema',
+												description:
+													'Generate JSON with custom schema (structured outputs)',
+											},
+										],
+										default: 'text',
+										description: 'Select the response format type',
+									},
+									{
+										displayName: 'JSON Schema',
+										name: 'json_schema',
+										type: 'json',
+										default: '{}',
+										displayOptions: {
+											show: {
+												format: ['json_schema'],
+											},
+										},
+										description:
+											'JSON schema for structured outputs when using json_schema format',
+									},
+								],
+							},
+						],
 					},
 					{
-						displayName: 'JSON Schema',
-						name: 'json_schema',
-						type: 'json',
-						displayOptions: {
-							show: {
-								response_format: ['json_schema'],
-							},
-						},
-						default: '{}',
+						displayName: 'Function Calling',
+						name: 'function_calling',
+						type: 'fixedCollection',
+						default: {},
 						description:
-							'JSON schema for structured outputs when using json_schema format',
-					},
-				],
-			},
-			{
-				displayName: 'Tools',
-				name: 'tools',
-				type: 'fixedCollection',
-				typeOptions: {
-					multipleValues: true,
-				},
-				default: {},
-				placeholder: 'Add Tool',
-				description:
-					'A list of tools the model may call. Currently, only functions are supported as a tool.',
-				options: [
-					{
-						displayName: 'Tool',
-						name: 'tool',
-						values: [
+							'Configure tools/functions the model can call and how they are selected',
+						options: [
 							{
-								displayName: 'Name',
-								name: 'name',
-								type: 'string',
-								required: true,
-								default: '',
-								description: 'The name of the function to be called',
-							},
-							{
-								displayName: 'Description',
-								name: 'description',
-								type: 'string',
-								required: true,
-								default: '',
-								description: 'A description of what the function does',
-							},
-							{
-								displayName: 'Parameters',
-								name: 'parameters',
-								type: 'json',
-								required: true,
-								description:
-									'The parameters the functions accepts, described as a JSON Schema object',
-								default: '{\n  "type": "object",\n  "properties": {}\n}',
+								displayName: 'Configuration',
+								name: 'config',
+								values: [
+									{
+										displayName: 'Tools',
+										name: 'tools',
+										type: 'fixedCollection',
+										typeOptions: {
+											multipleValues: true,
+										},
+										default: {},
+										placeholder: 'Add Tool',
+										description:
+											'A list of tools the model may call. Currently, only functions are supported as a tool.',
+										options: [
+											{
+												displayName: 'Tool',
+												name: 'tool',
+												values: [
+													{
+														displayName: 'Name',
+														name: 'name',
+														type: 'string',
+														required: true,
+														default: '',
+														description:
+															'The name of the function to be called',
+													},
+													{
+														displayName: 'Description',
+														name: 'description',
+														type: 'string',
+														required: true,
+														default: '',
+														description:
+															'A description of what the function does',
+													},
+													{
+														displayName: 'Parameters',
+														name: 'parameters',
+														type: 'json',
+														required: true,
+														description:
+															'The parameters the functions accepts, described as a JSON Schema object',
+														default:
+															'{\n  "type": "object",\n  "properties": {}\n}',
+													},
+												],
+											},
+										],
+									},
+									{
+										displayName: 'Tool Choice',
+										name: 'tool_choice',
+										type: 'options',
+										options: [
+											{
+												name: 'Auto',
+												value: 'auto',
+												description:
+													'Model can pick between generating a message or calling a function',
+											},
+											{
+												name: 'None',
+												value: 'none',
+												description:
+													'Model will not call any function and instead generate a message',
+											},
+											{
+												name: 'Required',
+												value: 'required',
+												description: 'Model must call a function',
+											},
+											{
+												name: 'Specific Function',
+												value: 'specific',
+												description:
+													'Force the model to call a specific function',
+											},
+										],
+										default: 'auto',
+										description:
+											'Controls which (if any) function is called by the model',
+									},
+									{
+										displayName: 'Function Name',
+										name: 'function_name',
+										type: 'string',
+										default: '',
+										displayOptions: {
+											show: {
+												tool_choice: ['specific'],
+											},
+										},
+										description:
+											'The name of the function to call when tool_choice is "specific"',
+									},
+								],
 							},
 						],
 					},
 				],
-			},
-			{
-				displayName: 'Tool Choice',
-				name: 'tool_choice',
-				type: 'options',
-				options: [
-					{
-						name: 'Auto',
-						value: 'auto',
-						description:
-							'Model can pick between generating a message or calling a function',
-					},
-					{
-						name: 'None',
-						value: 'none',
-						description:
-							'Model will not call any function and instead generate a message',
-					},
-					{
-						name: 'Required',
-						value: 'required',
-						description: 'Model must call a function',
-					},
-					{
-						name: 'Specific Function',
-						value: 'specific',
-						description: 'Force the model to call a specific function',
-					},
-				],
-				default: 'auto',
-				description:
-					'Controls which (if any) function is called by the model. Only effective when tools are provided.',
-			},
-			{
-				displayName: 'Function Name',
-				name: 'function_name',
-				type: 'string',
-				default: '',
-				displayOptions: {
-					show: {
-						tool_choice: ['specific'],
-					},
-				},
-				description:
-					'The name of the function to call when tool_choice is "specific"',
 			},
 		],
 	};
@@ -405,12 +441,30 @@ export class LmChatUpstage implements INodeType {
 					reasoning_effort?: string;
 					frequency_penalty?: number;
 					presence_penalty?: number;
-					response_format?: string;
-					json_schema?: string;
+					response_format?: {
+						values?: {
+							format?: string;
+							json_schema?: string;
+						};
+					};
+					function_calling?: {
+						config?: {
+							tools?: {
+								tool?: Array<{
+									name: string;
+									description: string;
+									parameters: string | IDataObject;
+								}>;
+							};
+							tool_choice?: string;
+							function_name?: string;
+						};
+					};
 				};
 
-				// Process tools parameter
-				const toolsRaw = this.getNodeParameter('tools.tool', i, []) as Array<{
+				// Process tools parameter from options.function_calling
+				const functionCallingConfig = options.function_calling?.config;
+				const toolsRaw = (functionCallingConfig?.tools?.tool || []) as Array<{
 					name: string;
 					description: string;
 					parameters: string | IDataObject;
@@ -445,19 +499,12 @@ export class LmChatUpstage implements INodeType {
 					}
 				}
 
-				// Process tool_choice parameter
-				const toolChoiceRaw = this.getNodeParameter(
-					'tool_choice',
-					i,
-					'auto'
-				) as string;
+				// Process tool_choice parameter from options.function_calling
+				const toolChoiceRaw = functionCallingConfig?.tool_choice || 'auto';
 				let toolChoice: ChatRequestBody['tool_choice'] = 'auto';
 
 				if (toolChoiceRaw === 'specific') {
-					const functionName = this.getNodeParameter(
-						'function_name',
-						i
-					) as string;
+					const functionName = functionCallingConfig?.function_name;
 					if (!functionName) {
 						throw new Error(
 							'Function name is required when tool_choice is "specific"'
@@ -515,15 +562,16 @@ export class LmChatUpstage implements INodeType {
 				}
 
 				// Handle response_format properly
-				if (options.response_format && options.response_format !== 'text') {
-					if (options.response_format === 'json_object') {
+				const responseFormatConfig = options.response_format?.values;
+				if (responseFormatConfig?.format && responseFormatConfig.format !== 'text') {
+					if (responseFormatConfig.format === 'json_object') {
 						requestBody.response_format = { type: 'json_object' };
 					} else if (
-						options.response_format === 'json_schema' &&
-						options.json_schema
+						responseFormatConfig.format === 'json_schema' &&
+						responseFormatConfig.json_schema
 					) {
 						try {
-							const schema = JSON.parse(options.json_schema);
+							const schema = JSON.parse(responseFormatConfig.json_schema);
 							requestBody.response_format = {
 								type: 'json_schema',
 								json_schema: schema,
@@ -532,8 +580,6 @@ export class LmChatUpstage implements INodeType {
 							throw new Error('Invalid JSON schema provided');
 						}
 					}
-					// Remove the raw response_format and json_schema from body
-					delete requestBody.json_schema;
 				}
 
 				// Make API request

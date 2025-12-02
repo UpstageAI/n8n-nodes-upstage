@@ -30,6 +30,9 @@ interface ModelConfig extends IDataObject {
 	maxTokens?: number;
 	temperature?: number;
 	streaming?: boolean;
+	topP?: number;
+	frequencyPenalty?: number;
+	presencePenalty?: number;
 	responseFormat?: IDataObject;
 }
 
@@ -162,6 +165,65 @@ export class LmChatModelUpstage implements INodeType {
 						type: 'boolean',
 					},
 					{
+						displayName: 'Top P',
+						name: 'topP',
+						type: 'number',
+						default: 0.9,
+						typeOptions: {
+							minValue: 0,
+							maxValue: 1,
+							numberPrecision: 2,
+						},
+						description: 'Nucleus sampling parameter',
+					},
+					{
+						displayName: 'Reasoning Effort',
+						name: 'reasoning_effort',
+						type: 'options',
+						options: [
+							{
+								name: 'Low',
+								value: 'low',
+								description: 'Disable reasoning for faster responses',
+							},
+							{
+								name: 'High',
+								value: 'high',
+								description:
+									'Enable reasoning for complex tasks (may increase token usage)',
+							},
+						],
+						default: 'low',
+						description:
+							'Controls the level of reasoning effort. Only applicable to Reasoning models.',
+					},
+					{
+						displayName: 'Frequency Penalty',
+						name: 'frequencyPenalty',
+						type: 'number',
+						default: 0,
+						typeOptions: {
+							minValue: -2,
+							maxValue: 2,
+							numberPrecision: 2,
+						},
+						description:
+							'Controls model tendency to repeat tokens. Positive values reduce repetition, negative values allow more repetition.',
+					},
+					{
+						displayName: 'Presence Penalty',
+						name: 'presencePenalty',
+						type: 'number',
+						default: 0,
+						typeOptions: {
+							minValue: -2,
+							maxValue: 2,
+							numberPrecision: 2,
+						},
+						description:
+							'Adjusts tendency to include tokens already present. Positive values encourage new ideas, negative values maintain consistency.',
+					},
+					{
 						displayName: 'Response Format',
 						name: 'response_format',
 						type: 'fixedCollection',
@@ -202,8 +264,123 @@ export class LmChatModelUpstage implements INodeType {
 										name: 'json_schema',
 										type: 'json',
 										default: '{}',
+										displayOptions: {
+											show: {
+												format: ['json_schema'],
+											},
+										},
 										description:
-											'The JSON schema object for structured outputs. Required when Format is "JSON Schema". When Format is "JSON Object", this field is ignored and can be left empty. This will be sent as response_format: {"type": "json_schema", "json_schema": {...your schema...}}',
+											'The JSON schema object for structured outputs. This will be sent as response_format: {"type": "json_schema", "json_schema": {...your schema...}}',
+									},
+								],
+							},
+						],
+					},
+					{
+						displayName: 'Function Calling',
+						name: 'function_calling',
+						type: 'fixedCollection',
+						default: {},
+						description:
+							'Configure tools/functions the model can call and how they are selected',
+						options: [
+							{
+								displayName: 'Configuration',
+								name: 'config',
+								values: [
+									{
+										displayName: 'Tools',
+										name: 'tools',
+										type: 'fixedCollection',
+										typeOptions: {
+											multipleValues: true,
+										},
+										default: {},
+										placeholder: 'Add Tool',
+										description:
+											'A list of tools the model may call. Currently, only functions are supported as a tool.',
+										options: [
+											{
+												displayName: 'Tool',
+												name: 'tool',
+												values: [
+													{
+														displayName: 'Name',
+														name: 'name',
+														type: 'string',
+														required: true,
+														default: '',
+														description:
+															'The name of the function to be called',
+													},
+													{
+														displayName: 'Description',
+														name: 'description',
+														type: 'string',
+														required: true,
+														default: '',
+														description:
+															'A description of what the function does',
+													},
+													{
+														displayName: 'Parameters',
+														name: 'parameters',
+														type: 'json',
+														required: true,
+														description:
+															'The parameters the functions accepts, described as a JSON Schema object',
+														default:
+															'{\n  "type": "object",\n  "properties": {}\n}',
+													},
+												],
+											},
+										],
+									},
+									{
+										displayName: 'Tool Choice',
+										name: 'tool_choice',
+										type: 'options',
+										options: [
+											{
+												name: 'Auto',
+												value: 'auto',
+												description:
+													'Model can pick between generating a message or calling a function',
+											},
+											{
+												name: 'None',
+												value: 'none',
+												description:
+													'Model will not call any function and instead generate a message',
+											},
+											{
+												name: 'Required',
+												value: 'required',
+												description: 'Model must call a function',
+											},
+											{
+												name: 'Specific Function',
+												value: 'specific',
+												description:
+													'Force the model to call a specific function',
+											},
+										],
+										default: 'auto',
+										description:
+											'Controls which (if any) function is called by the model',
+									},
+									{
+										displayName: 'Function Name',
+										name: 'function_name',
+										type: 'string',
+										default: '',
+										displayOptions: {
+											show: {
+												tool_choice: ['specific'],
+											},
+										},
+										description:
+											'The name of the function to call when tool_choice is "specific"',
 									},
 								],
 							},
@@ -332,10 +509,27 @@ export class LmChatModelUpstage implements INodeType {
 			maxTokens?: number;
 			temperature?: number;
 			streaming?: boolean;
+			topP?: number;
+			reasoning_effort?: string;
+			frequencyPenalty?: number;
+			presencePenalty?: number;
 			response_format?: {
 				values?: {
 					format?: string;
 					json_schema?: string;
+				};
+			};
+			function_calling?: {
+				config?: {
+					tools?: {
+						tool?: Array<{
+							name: string;
+							description: string;
+							parameters: string | IDataObject;
+						}>;
+					};
+					tool_choice?: string;
+					function_name?: string;
 				};
 			};
 		};
@@ -448,11 +642,56 @@ export class LmChatModelUpstage implements INodeType {
 			maxTokens: options.maxTokens,
 			temperature: options.temperature,
 			streaming: options.streaming || false,
+			topP: options.topP,
+			frequencyPenalty: options.frequencyPenalty,
+			presencePenalty: options.presencePenalty,
 		};
 
 		// Add response_format if specified
 		if (responseFormat) {
 			modelConfig.responseFormat = responseFormat;
+		}
+
+		// Add reasoning_effort as model kwargs if specified
+		if (options.reasoning_effort) {
+			modelConfig.modelKwargs = {
+				...(modelConfig.modelKwargs as Record<string, unknown> || {}),
+				reasoning_effort: options.reasoning_effort,
+			};
+		}
+
+		// Process function_calling tools if provided
+		const functionCallingConfig = options.function_calling?.config;
+		if (functionCallingConfig?.tools?.tool && functionCallingConfig.tools.tool.length > 0) {
+			const tools = functionCallingConfig.tools.tool.map(toolRaw => {
+				const parameters =
+					typeof toolRaw.parameters === 'string'
+						? JSON.parse(toolRaw.parameters)
+						: toolRaw.parameters;
+				return {
+					type: 'function' as const,
+					function: {
+						name: toolRaw.name,
+						description: toolRaw.description,
+						parameters,
+					},
+				};
+			});
+			modelConfig.tools = tools;
+
+			// Handle tool_choice
+			const toolChoiceRaw = functionCallingConfig.tool_choice || 'auto';
+			if (toolChoiceRaw === 'specific') {
+				const functionName = functionCallingConfig.function_name;
+				if (functionName) {
+					modelConfig.toolChoice = {
+						type: 'function',
+						function: { name: functionName },
+					};
+				}
+			} else if (toolChoiceRaw !== 'auto') {
+				modelConfig.toolChoice = toolChoiceRaw;
+			}
 		}
 
 		// Add tracing callbacks if available (when installed in n8n core)

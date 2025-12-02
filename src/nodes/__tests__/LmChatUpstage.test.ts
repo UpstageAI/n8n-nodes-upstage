@@ -212,17 +212,24 @@ describe('LmChatUpstage', () => {
 						if (param === 'model') return 'solar-mini';
 						if (param === 'messages.message')
 							return [{ role: 'user', content: 'What is the weather?' }];
-						if (param === 'options') return {};
-						if (param === 'tools.tool')
-							return [
-								{
-									name: 'get_weather',
-									description: 'Get weather information',
-									parameters:
-										'{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}',
+						if (param === 'options')
+							return {
+								function_calling: {
+									config: {
+										tools: {
+											tool: [
+												{
+													name: 'get_weather',
+													description: 'Get weather information',
+													parameters:
+														'{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}',
+												},
+											],
+										},
+										tool_choice: 'auto',
+									},
 								},
-							];
-						if (param === 'tool_choice') return 'auto';
+							};
 						return undefined;
 					}
 				);
@@ -276,17 +283,24 @@ describe('LmChatUpstage', () => {
 						if (param === 'model') return 'solar-mini';
 						if (param === 'messages.message')
 							return [{ role: 'user', content: 'What is the weather?' }];
-						if (param === 'options') return {};
-						if (param === 'tools.tool')
-							return [
-								{
-									name: 'get_weather',
-									description: 'Get weather information',
-									parameters:
-										'{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}',
+						if (param === 'options')
+							return {
+								function_calling: {
+									config: {
+										tools: {
+											tool: [
+												{
+													name: 'get_weather',
+													description: 'Get weather information',
+													parameters:
+														'{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}',
+												},
+											],
+										},
+										tool_choice: 'auto',
+									},
 								},
-							];
-						if (param === 'tool_choice') return 'auto';
+							};
 						return undefined;
 					}
 				);
@@ -339,18 +353,25 @@ describe('LmChatUpstage', () => {
 						if (param === 'model') return 'solar-mini';
 						if (param === 'messages.message')
 							return [{ role: 'user', content: 'What is the weather?' }];
-						if (param === 'options') return {};
-						if (param === 'tools.tool')
-							return [
-								{
-									name: 'get_weather',
-									description: 'Get weather information',
-									parameters:
-										'{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}',
+						if (param === 'options')
+							return {
+								function_calling: {
+									config: {
+										tools: {
+											tool: [
+												{
+													name: 'get_weather',
+													description: 'Get weather information',
+													parameters:
+														'{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}',
+												},
+											],
+										},
+										tool_choice: 'specific',
+										function_name: 'get_weather',
+									},
 								},
-							];
-						if (param === 'tool_choice') return 'specific';
-						if (param === 'function_name') return 'get_weather';
+							};
 						return undefined;
 					}
 				);
@@ -380,16 +401,23 @@ describe('LmChatUpstage', () => {
 						if (param === 'model') return 'solar-mini';
 						if (param === 'messages.message')
 							return [{ role: 'user', content: 'Hello' }];
-						if (param === 'options') return {};
-						if (param === 'tools.tool')
-							return [
-								{
-									name: 'get_weather',
-									description: 'Get weather information',
-									parameters: 'invalid json',
+						if (param === 'options')
+							return {
+								function_calling: {
+									config: {
+										tools: {
+											tool: [
+												{
+													name: 'get_weather',
+													description: 'Get weather information',
+													parameters: 'invalid json',
+												},
+											],
+										},
+										tool_choice: 'auto',
+									},
 								},
-							];
-						if (param === 'tool_choice') return 'auto';
+							};
 						return undefined;
 					}
 				);
