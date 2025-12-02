@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-upstage",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Upstage LLM and Embeddings nodes for n8n",
   "license": "MIT",
   "homepage": "https://github.com/UpstageAI/n8n-nodes-upstage",
