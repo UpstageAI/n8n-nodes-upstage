@@ -1,5 +1,4 @@
 import { ChatOpenAI } from '@langchain/openai';
-import { DynamicStructuredTool } from '@langchain/core/tools';
 import {
 	type INodeType,
 	type INodeTypeDescription,
@@ -12,7 +11,6 @@ import {
 import { N8nLlmTracing, type TokensUsageParser } from '../utils/N8nLlmTracing';
 import { makeN8nLlmFailedAttemptHandler } from '../utils/n8nLlmFailedAttemptHandler';
 import { getConnectionHintNoticeField } from '../utils/sharedFields';
-import { jsonSchemaToZod } from '@n8n/json-schema-to-zod';
 import { compareModelNames } from '../utils/modelHelpers';
 
 interface ModelOption {
@@ -166,84 +164,48 @@ export class LmChatModelUpstage implements INodeType {
 					{
 						displayName: 'Response Format',
 						name: 'response_format',
-						type: 'options',
-						options: [
-							{
-								name: 'Text (Default)',
-								value: 'text',
-								description: 'Standard text response',
-							},
-							{
-								name: 'JSON Object',
-								value: 'json_object',
-								description: 'Generate JSON object (requires "JSON" in prompt)',
-							},
-							{
-								name: 'JSON Schema',
-								value: 'json_schema',
-								description:
-									'Generate JSON with custom schema (structured outputs)',
-							},
-						],
-						default: 'text',
-						description:
-							'Format for model output. JSON formats only work with solar-pro2 model.',
-					},
-					{
-						displayName: 'JSON Schema',
-						name: 'json_schema',
-						type: 'json',
-						displayOptions: {
-							show: {
-								response_format: ['json_schema'],
+						type: 'fixedCollection',
+						default: {
+							values: {
+								format: 'json_object',
 							},
 						},
-						default: '{}',
-						description:
-							'JSON schema for structured outputs when using json_schema format',
-					},
-				],
-			},
-			{
-				displayName: 'Tools',
-				name: 'tools',
-				type: 'fixedCollection',
-				typeOptions: {
-					multipleValues: true,
-				},
-				default: {},
-				placeholder: 'Add Tool',
-				description:
-					'A list of tools the model may call. These tools will be bound to the model using LangChain bindTools.',
-				options: [
-					{
-						displayName: 'Tool',
-						name: 'tool',
-						values: [
+						description: 'Format for model output. Both formats only work with solar-pro-2 model.',
+						options: [
 							{
-								displayName: 'Name',
-								name: 'name',
-								type: 'string',
-								required: true,
-								default: '',
-								description: 'The name of the function to be called',
-							},
-							{
-								displayName: 'Description',
-								name: 'description',
-								type: 'string',
-								required: true,
-								default: '',
-								description: 'A description of what the function does',
-							},
-							{
-								displayName: 'Parameters',
-								name: 'parameters',
-								type: 'json',
-								required: true,
-								description:
-									'The parameters the functions accepts, described as a JSON Schema object',
-								default: '{\n  "type": "object",\n  "properties": {}\n}',
+								displayName: 'Response Format',
+								name: 'values',
+								values: [
+									{
+										displayName: 'Format',
+										name: 'format',
+										type: 'options',
+										options: [
+											{
+												name: 'JSON Object',
+												value: 'json_object',
+												description:
+													'Generate JSON object without schema (JSON Mode). Requires "JSON" in prompt. Only compatible with solar-pro-2 model.',
+											},
+											{
+												name: 'JSON Schema',
+												value: 'json_schema',
+												description:
+													'Generate JSON with custom schema (Structured outputs). Only compatible with solar-pro-2 model.',
+											},
+										],
+										default: 'json_object',
+										description: 'Select the response format type',
+									},
+									{
+										displayName: 'JSON Schema',
+										name: 'json_schema',
+										type: 'json',
+										default: '{}',
+										description:
+											'The JSON schema object for structured outputs. Required when Format is "JSON Schema". When Format is "JSON Object", this field is ignored and can be left empty. This will be sent as response_format: {"type": "json_schema", "json_schema": {...your schema...}}',
+									},
+								],
 							},
 						],
 					},
@@ -370,8 +332,12 @@ export class LmChatModelUpstage implements INodeType {
 			maxTokens?: number;
 			temperature?: number;
 			streaming?: boolean;
-			response_format?: string;
-			json_schema?: string;
+			response_format?: {
+				values?: {
+					format?: string;
+					json_schema?: string;
+				};
+			};
 		};
 
 		const configuration = {
@@ -443,17 +409,26 @@ export class LmChatModelUpstage implements INodeType {
 		});
 		const failureHandler = makeN8nLlmFailedAttemptHandler(this);
 
-		// Handle response_format properly
+		// Handle response_format properly according to Upstage API documentation:
+		// - JSON Mode: {"type": "json_object"}
+		// - Structured outputs: {"type": "json_schema", "json_schema": {...schema...}}
+		// Note: If response_format is not set or empty, default text response is used
 		let responseFormat: IDataObject | undefined;
-		if (options.response_format && options.response_format !== 'text') {
-			if (options.response_format === 'json_object') {
+		const responseFormatConfig = options.response_format?.values;
+		if (responseFormatConfig?.format) {
+			if (responseFormatConfig.format === 'json_object') {
+				// JSON Mode: Generate JSON object without schema
+				// json_schema field is ignored when format is json_object
 				responseFormat = { type: 'json_object' };
-			} else if (
-				options.response_format === 'json_schema' &&
-				options.json_schema
-			) {
+			} else if (responseFormatConfig.format === 'json_schema') {
+				// Structured outputs: Generate JSON with custom schema
+				if (!responseFormatConfig.json_schema) {
+					throw new Error(
+						'JSON Schema is required when response_format format is set to json_schema'
+					);
+				}
 				try {
-					const schema = JSON.parse(options.json_schema);
+					const schema = JSON.parse(responseFormatConfig.json_schema);
 					responseFormat = {
 						type: 'json_schema',
 						json_schema: schema,
@@ -492,59 +467,7 @@ export class LmChatModelUpstage implements INodeType {
 
 		const model = new ChatOpenAI(modelConfig);
 
-		// Process tools parameter for Function Calling
-		const toolsRaw = this.getNodeParameter(
-			'tools.tool',
-			itemIndex,
-			[]
-		) as Array<{
-			name: string;
-			description: string;
-			parameters: string | IDataObject;
-		}>;
-
-		// If tools are provided, bind them to the model
-		if (toolsRaw && toolsRaw.length > 0) {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const langChainTools: any[] = [];
-
-			for (const toolRaw of toolsRaw) {
-				try {
-					const parameters =
-						typeof toolRaw.parameters === 'string'
-							? JSON.parse(toolRaw.parameters)
-							: toolRaw.parameters;
-
-					// Convert JSON Schema to Zod schema
-					const zodSchema = jsonSchemaToZod(parameters as any);
-
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					const tool = new DynamicStructuredTool({
-						name: toolRaw.name,
-						description: toolRaw.description,
-						schema: zodSchema as any,
-						func: async (input: any) => {
-							// Actual function execution is handled by the AI Agent node
-							// This is just a placeholder that returns the input as JSON
-							return JSON.stringify(input);
-						},
-					}) as any;
-
-					langChainTools.push(tool);
-				} catch (error) {
-					throw new Error(
-						`Invalid tool parameters JSON for tool "${toolRaw.name}": ${error instanceof Error ? error.message : String(error)}`
-					);
-				}
-			}
-
-			// Bind tools to the model using LangChain's bindTools
-			// Type assertion needed due to LangChain's complex generic types
-			return {
-				response: model.bindTools(langChainTools),
-			};
-		}
-
+		// Tools are managed by the AI Agent node, not here
 		return {
 			response: model,
 		};
