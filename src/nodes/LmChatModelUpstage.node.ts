@@ -32,6 +32,7 @@ interface ModelConfig extends IDataObject {
 	maxTokens?: number;
 	temperature?: number;
 	streaming?: boolean;
+	responseFormat?: IDataObject;
 }
 
 export class LmChatModelUpstage implements INodeType {
@@ -161,6 +162,45 @@ export class LmChatModelUpstage implements INodeType {
 						default: false,
 						description: 'Whether to stream the response',
 						type: 'boolean',
+					},
+					{
+						displayName: 'Response Format',
+						name: 'response_format',
+						type: 'options',
+						options: [
+							{
+								name: 'Text (Default)',
+								value: 'text',
+								description: 'Standard text response',
+							},
+							{
+								name: 'JSON Object',
+								value: 'json_object',
+								description: 'Generate JSON object (requires "JSON" in prompt)',
+							},
+							{
+								name: 'JSON Schema',
+								value: 'json_schema',
+								description:
+									'Generate JSON with custom schema (structured outputs)',
+							},
+						],
+						default: 'text',
+						description:
+							'Format for model output. JSON formats only work with solar-pro2 model.',
+					},
+					{
+						displayName: 'JSON Schema',
+						name: 'json_schema',
+						type: 'json',
+						displayOptions: {
+							show: {
+								response_format: ['json_schema'],
+							},
+						},
+						default: '{}',
+						description:
+							'JSON schema for structured outputs when using json_schema format',
 					},
 				],
 			},
@@ -330,6 +370,8 @@ export class LmChatModelUpstage implements INodeType {
 			maxTokens?: number;
 			temperature?: number;
 			streaming?: boolean;
+			response_format?: string;
+			json_schema?: string;
 		};
 
 		const configuration = {
@@ -401,6 +443,29 @@ export class LmChatModelUpstage implements INodeType {
 		});
 		const failureHandler = makeN8nLlmFailedAttemptHandler(this);
 
+		// Handle response_format properly
+		let responseFormat: IDataObject | undefined;
+		if (options.response_format && options.response_format !== 'text') {
+			if (options.response_format === 'json_object') {
+				responseFormat = { type: 'json_object' };
+			} else if (
+				options.response_format === 'json_schema' &&
+				options.json_schema
+			) {
+				try {
+					const schema = JSON.parse(options.json_schema);
+					responseFormat = {
+						type: 'json_schema',
+						json_schema: schema,
+					};
+				} catch (error) {
+					throw new Error(
+						`Invalid JSON schema provided: ${error instanceof Error ? error.message : String(error)}`
+					);
+				}
+			}
+		}
+
 		const modelConfig: ModelConfig = {
 			apiKey: credentials.apiKey as string,
 			model: modelName, // Use 'model' instead of 'modelName' for better API compatibility
@@ -409,6 +474,11 @@ export class LmChatModelUpstage implements INodeType {
 			temperature: options.temperature,
 			streaming: options.streaming || false,
 		};
+
+		// Add response_format if specified
+		if (responseFormat) {
+			modelConfig.responseFormat = responseFormat;
+		}
 
 		// Add tracing callbacks if available (when installed in n8n core)
 		if (tracing) {
