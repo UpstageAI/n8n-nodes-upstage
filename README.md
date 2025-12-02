@@ -91,9 +91,13 @@ Use Upstage Solar LLM models for chat completions with conversation support.
 - Message-based conversation format (system, user, assistant roles)
 - Configurable parameters: temperature, max tokens, top-p
 - Streaming response support
-- JSON output formats (solar-pro2 only)
+- Response format options (solar-pro2 only):
+  - Text (default)
+  - JSON Object - Generate structured JSON responses
+  - JSON Schema - Generate JSON with custom schema for structured outputs
 - Reasoning effort control
 - Frequency and presence penalty
+- Function calling support (tools)
 
 **Example Use Cases:**
 - Customer support chatbots
@@ -221,6 +225,11 @@ LangChain-compatible chat model for use with n8n AI Chain and AI Agent nodes.
 - Automatic model selection from API
 - Token usage tracking
 - Streaming support
+- Response format options (solar-pro2 only):
+  - Text (default)
+  - JSON Object - Generate structured JSON responses
+  - JSON Schema - Generate JSON with custom schema for structured outputs
+- Function calling support (tools) - Bind tools to the model using LangChain bindTools
 - N8n tracing integration
 - Proxy support
 
@@ -288,6 +297,31 @@ Use the **Upstage Embed** node with "Array of Texts" input type to process multi
 2. **AI Agent** node → Connect to chat model
 3. **Upstage Embed for Agent** → Connect to vector store
 4. Build complex AI workflows
+
+### Structured JSON Output (Response Format)
+
+Use response format options to get structured JSON responses from the model:
+
+1. Add **Upstage Solar Chat** or **Upstage Solar Chat for Agent** node
+2. Select `solar-pro2` model
+3. In Options, set **Response Format** to:
+   - **JSON Object**: For simple JSON responses (requires "JSON" in prompt)
+   - **JSON Schema**: For custom structured outputs with your own schema
+4. If using JSON Schema, provide your JSON schema definition
+5. Execute to get structured JSON response
+
+**Example JSON Schema:**
+```json
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "age": { "type": "number" },
+    "email": { "type": "string" }
+  },
+  "required": ["name", "email"]
+}
+```
 
 ## Configuration
 
