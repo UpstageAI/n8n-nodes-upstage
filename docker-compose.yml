@@ -7,6 +7,12 @@ services:
       - .:/workspace
     command: >
       sh -c "
+        # Skip builder in production mode
+        if [ \"$${NODE_MODE:-dev}\" = \"prod\" ]; then
+          echo '[Builder] Production mode detected, skipping build.'
+          exit 0
+        fi
+        
         build() {
           echo '[Builder] Building...'
           npm ci
@@ -53,10 +59,13 @@ services:
         fi
       "
     restart: "no"
+    environment:
+      - NODE_MODE=${NODE_MODE:-dev}
 
   n8n:
     image: n8nio/n8n:latest
     container_name: n8n-upstage
+    # Builder dependency: builder will skip in prod mode automatically
     depends_on:
       builder:
         condition: service_completed_successfully
@@ -64,11 +73,14 @@ services:
       - "5678:5678"
     volumes:
       - ./n8n_data:/home/node/.n8n
+      # Local development volumes (only used when NODE_MODE=dev)
       - ./dist:/tmp/n8n-nodes-upstage/dist:ro
       - ./package.json:/tmp/n8n-nodes-upstage/package.json:ro
     environment:
       - N8N_COMMUNITY_NODES_ENABLED=true
       - N8N_CUSTOM_EXTENSIONS=/home/node/.n8n/custom
+      # Mode: 'dev' for local development, 'prod' for npm package
+      - NODE_MODE=${NODE_MODE:-dev}
       # Performance and deprecation fixes
       - DB_SQLITE_POOL_SIZE=10
       - N8N_RUNNERS_ENABLED=true
@@ -79,16 +91,36 @@ services:
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
     entrypoint: >
       sh -c "
-        if [ ! -f /home/node/.n8n/custom/package.json ] || [ /tmp/n8n-nodes-upstage/package.json -nt /home/node/.n8n/custom/package.json ] || [ \"$$(find /tmp/n8n-nodes-upstage/dist -type f -name '*.js' -newer /home/node/.n8n/custom/package.json 2>/dev/null | head -1)\" != \"\" ]; then
-          echo '[upstage] Installing/Updating n8n-nodes-upstage...'
+        if [ \"$$NODE_MODE\" = \"prod\" ]; then
+          echo '[upstage] Production mode: Installing latest n8n-nodes-upstage from npm...'
           mkdir -p /home/node/.n8n/custom
-          rm -rf /home/node/.n8n/custom/*
-          cp -r /tmp/n8n-nodes-upstage/* /home/node/.n8n/custom/
           cd /home/node/.n8n/custom
-          npm install --production --legacy-peer-deps
-          echo '[upstage] n8n-nodes-upstage installed/updated successfully!'
+          # Always install the latest version from npm registry
+          if [ ! -f package.json ]; then
+            npm init -y
+          fi
+          # Remove existing installation to ensure fresh install of latest version
+          if [ -d node_modules/n8n-nodes-upstage ]; then
+            echo '[upstage] Removing existing installation to ensure latest version...'
+            rm -rf node_modules/n8n-nodes-upstage
+          fi
+          # Install latest version explicitly
+          echo '[upstage] Installing latest n8n-nodes-upstage from npm registry...'
+          npm install n8n-nodes-upstage@latest --legacy-peer-deps --save
+          echo '[upstage] Latest n8n-nodes-upstage installed successfully!'
         else
-          echo '[upstage] n8n-nodes-upstage is up to date, skipping reinstall.'
+          echo '[upstage] Development mode: Using local n8n-nodes-upstage...'
+          if [ ! -f /home/node/.n8n/custom/package.json ] || [ /tmp/n8n-nodes-upstage/package.json -nt /home/node/.n8n/custom/package.json ] || [ \"$$(find /tmp/n8n-nodes-upstage/dist -type f -name '*.js' -newer /home/node/.n8n/custom/package.json 2>/dev/null | head -1)\" != \"\" ]; then
+            echo '[upstage] Installing/Updating local n8n-nodes-upstage...'
+            mkdir -p /home/node/.n8n/custom
+            rm -rf /home/node/.n8n/custom/*
+            cp -r /tmp/n8n-nodes-upstage/* /home/node/.n8n/custom/
+            cd /home/node/.n8n/custom
+            npm install --production --legacy-peer-deps
+            echo '[upstage] Local n8n-nodes-upstage installed/updated successfully!'
+          else
+            echo '[upstage] Local n8n-nodes-upstage is up to date, skipping reinstall.'
+          fi
         fi
         exec n8n start
       "
