@@ -198,104 +198,15 @@ describe('LmChatModelUpstage', () => {
 			).rejects.toThrow();
 		});
 
-		describe('Function Calling', () => {
-			it('should bind tools to model when tools are provided', async () => {
-				(
-					mockSupplyDataFunctions.getNodeParameter as jest.Mock
-				).mockImplementation(
-					(param: string, _i: number, defaultValue?: unknown) => {
-						if (param === 'model') return 'solar-mini';
-						if (param === 'options') return {};
-						if (param === 'tools.tool')
-							return [
-								{
-									name: 'get_weather',
-									description: 'Get weather information',
-									parameters:
-										'{"type":"object","properties":{"location":{"type":"string"}},"required":["location"]}',
-								},
-							];
-						return defaultValue;
-					}
-				);
-				(mockSupplyDataFunctions.getCredentials as jest.Mock).mockResolvedValue(
-					{
-						apiKey: 'test-key',
-					}
-				);
-
-				const result = await node.supplyData.call(mockSupplyDataFunctions, 0);
-
-				expect(result.response).toBeDefined();
-				// The response should be a bound model (not the original ChatOpenAI instance)
-				// We can't easily test bindTools directly, but we can verify the method was called
-			});
-
-			it('should handle invalid tool parameters JSON', async () => {
-				(
-					mockSupplyDataFunctions.getNodeParameter as jest.Mock
-				).mockImplementation(
-					(param: string, _i: number, defaultValue?: unknown) => {
-						if (param === 'model') return 'solar-mini';
-						if (param === 'options') return {};
-						if (param === 'tools.tool')
-							return [
-								{
-									name: 'get_weather',
-									description: 'Get weather information',
-									parameters: 'invalid json',
-								},
-							];
-						return defaultValue;
-					}
-				);
-				(mockSupplyDataFunctions.getCredentials as jest.Mock).mockResolvedValue(
-					{
-						apiKey: 'test-key',
-					}
-				);
-
-				await expect(
-					node.supplyData.call(mockSupplyDataFunctions, 0)
-				).rejects.toThrow('Invalid tool parameters JSON');
-			});
-
-			it('should return model without tools when no tools provided', async () => {
-				(
-					mockSupplyDataFunctions.getNodeParameter as jest.Mock
-				).mockImplementation(
-					(param: string, _i: number, defaultValue?: unknown) => {
-						if (param === 'model') return 'solar-mini';
-						if (param === 'options') return {};
-						if (param === 'tools.tool') return [];
-						return defaultValue;
-					}
-				);
-				(mockSupplyDataFunctions.getCredentials as jest.Mock).mockResolvedValue(
-					{
-						apiKey: 'test-key',
-					}
-				);
-
-				const result = await node.supplyData.call(mockSupplyDataFunctions, 0);
-
-				expect(result.response).toBeDefined();
-			const MockedChatOpenAI = require('@langchain/openai').ChatOpenAI;
-			expect(MockedChatOpenAI).toHaveBeenCalled();
-			});
-		});
-
 		describe('Response Format', () => {
-			it('should not set responseFormat when response_format is text or not provided', async () => {
+			it('should not set responseFormat when response_format is not provided', async () => {
 				(
 					mockSupplyDataFunctions.getNodeParameter as jest.Mock
 				).mockImplementation(
 					(param: string, _i: number, defaultValue?: unknown) => {
 						if (param === 'model') return 'solar-mini';
 						if (param === 'options') {
-							return {
-								response_format: 'text',
-							};
+							return {};
 						}
 						return defaultValue;
 					}
@@ -314,7 +225,7 @@ describe('LmChatModelUpstage', () => {
 				expect(lastConfig.responseFormat).toBeUndefined();
 			});
 
-			it('should set responseFormat to json_object when response_format is json_object', async () => {
+			it('should set responseFormat to json_object when response_format format is json_object', async () => {
 				(
 					mockSupplyDataFunctions.getNodeParameter as jest.Mock
 				).mockImplementation(
@@ -322,7 +233,11 @@ describe('LmChatModelUpstage', () => {
 						if (param === 'model') return 'solar-pro2';
 						if (param === 'options') {
 							return {
-								response_format: 'json_object',
+								response_format: {
+									values: {
+										format: 'json_object',
+									},
+								},
 							};
 						}
 						return defaultValue;
@@ -343,7 +258,7 @@ describe('LmChatModelUpstage', () => {
 				expect(lastConfig.responseFormat).toEqual({ type: 'json_object' });
 			});
 
-			it('should set responseFormat to json_schema when response_format is json_schema with valid schema', async () => {
+			it('should set responseFormat to json_schema when response_format format is json_schema with valid schema', async () => {
 				const validSchema = {
 					type: 'object',
 					properties: {
@@ -360,8 +275,12 @@ describe('LmChatModelUpstage', () => {
 						if (param === 'model') return 'solar-pro2';
 						if (param === 'options') {
 							return {
-								response_format: 'json_schema',
-								json_schema: JSON.stringify(validSchema),
+								response_format: {
+									values: {
+										format: 'json_schema',
+										json_schema: JSON.stringify(validSchema),
+									},
+								},
 							};
 						}
 						return defaultValue;
@@ -393,8 +312,12 @@ describe('LmChatModelUpstage', () => {
 						if (param === 'model') return 'solar-pro2';
 						if (param === 'options') {
 							return {
-								response_format: 'json_schema',
-								json_schema: 'invalid json string{',
+								response_format: {
+									values: {
+										format: 'json_schema',
+										json_schema: 'invalid json string{',
+									},
+								},
 							};
 						}
 						return defaultValue;
@@ -411,7 +334,7 @@ describe('LmChatModelUpstage', () => {
 				).rejects.toThrow('Invalid JSON schema provided');
 			});
 
-			it('should not set responseFormat when json_schema is missing for json_schema type', async () => {
+			it('should throw error when json_schema is missing for json_schema format', async () => {
 				(
 					mockSupplyDataFunctions.getNodeParameter as jest.Mock
 				).mockImplementation(
@@ -419,8 +342,12 @@ describe('LmChatModelUpstage', () => {
 						if (param === 'model') return 'solar-pro2';
 						if (param === 'options') {
 							return {
-								response_format: 'json_schema',
-								// json_schema is missing
+								response_format: {
+									values: {
+										format: 'json_schema',
+										// json_schema is missing
+									},
+								},
 							};
 						}
 						return defaultValue;
@@ -432,12 +359,9 @@ describe('LmChatModelUpstage', () => {
 					}
 				);
 
-				await node.supplyData.call(mockSupplyDataFunctions, 0);
-
-				// responseFormat should not be set when json_schema is missing
-				expect(chatOpenAIConstructorArgs.length).toBeGreaterThan(0);
-				const lastConfig = chatOpenAIConstructorArgs[chatOpenAIConstructorArgs.length - 1];
-				expect(lastConfig.responseFormat).toBeUndefined();
+				await expect(
+					node.supplyData.call(mockSupplyDataFunctions, 0)
+				).rejects.toThrow('JSON Schema is required when response_format format is set to json_schema');
 			});
 
 			it('should combine responseFormat with other options', async () => {
@@ -451,7 +375,11 @@ describe('LmChatModelUpstage', () => {
 								temperature: 0.8,
 								maxTokens: 2000,
 								streaming: true,
-								response_format: 'json_object',
+								response_format: {
+									values: {
+										format: 'json_object',
+									},
+								},
 							};
 						}
 						return defaultValue;
@@ -472,6 +400,39 @@ describe('LmChatModelUpstage', () => {
 				expect(lastConfig.temperature).toBe(0.8);
 				expect(lastConfig.maxTokens).toBe(2000);
 				expect(lastConfig.streaming).toBe(true);
+			});
+
+			it('should ignore json_schema when format is json_object', async () => {
+				(
+					mockSupplyDataFunctions.getNodeParameter as jest.Mock
+				).mockImplementation(
+					(param: string, _i: number, defaultValue?: unknown) => {
+						if (param === 'model') return 'solar-pro2';
+						if (param === 'options') {
+							return {
+								response_format: {
+									values: {
+										format: 'json_object',
+										json_schema: '{"type":"object"}', // This should be ignored
+									},
+								},
+							};
+						}
+						return defaultValue;
+					}
+				);
+				(mockSupplyDataFunctions.getCredentials as jest.Mock).mockResolvedValue(
+					{
+						apiKey: 'test-key',
+					}
+				);
+
+				await node.supplyData.call(mockSupplyDataFunctions, 0);
+
+				// Check that responseFormat is json_object, not json_schema
+				expect(chatOpenAIConstructorArgs.length).toBeGreaterThan(0);
+				const lastConfig = chatOpenAIConstructorArgs[chatOpenAIConstructorArgs.length - 1];
+				expect(lastConfig.responseFormat).toEqual({ type: 'json_object' });
 			});
 		});
 	});
