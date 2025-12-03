@@ -130,6 +130,44 @@ export class LmChatModelUpstage implements INodeType {
 				default: '',
 			},
 			{
+				displayName: 'Response Format',
+				name: 'response_format',
+				type: 'options',
+				placeholder: 'Add Response Format',
+				options: [
+					{
+						name: 'Text (Default)',
+						value: 'default',
+						description: 'This configuration does not utilise the response format parameter. The response is provided in the standard format.',
+					},
+					{
+						name: 'JSON Object',
+						value: 'json_object',
+						description:
+							'Generate JSON object without schema (JSON Mode). Requires "JSON" in prompt. Only compatible with solar-pro-2 model.',
+					},
+					{
+						name: 'JSON Schema',
+						value: 'json_schema',
+						description:
+							'Generate JSON with custom schema (Structured outputs). Only compatible with solar-pro-2 model.',
+					},
+				],
+				default: 'default',
+				description: 'Format for model output. JSON formats only work with solar-pro-2 model.',
+			},
+			{
+				displayName: 'JSON Schema',
+				name: 'json_schema',
+				type: 'json',
+				default: '{}',
+				displayOptions: {
+					show: {
+						response_format: ['json_schema'],
+					},
+				},
+			},
+			{
 				displayName: 'Options',
 				name: 'options',
 				placeholder: 'Add Option',
@@ -222,59 +260,6 @@ export class LmChatModelUpstage implements INodeType {
 						},
 						description:
 							'Adjusts tendency to include tokens already present. Positive values encourage new ideas, negative values maintain consistency.',
-					},
-					{
-						displayName: 'Response Format',
-						name: 'response_format',
-						type: 'fixedCollection',
-						default: {
-							values: {
-								format: 'json_object',
-							},
-						},
-						description: 'Format for model output. Both formats only work with solar-pro-2 model.',
-						options: [
-							{
-								displayName: 'Response Format',
-								name: 'values',
-								values: [
-									{
-										displayName: 'Format',
-										name: 'format',
-										type: 'options',
-										options: [
-											{
-												name: 'JSON Object',
-												value: 'json_object',
-												description:
-													'Generate JSON object without schema (JSON Mode). Requires "JSON" in prompt. Only compatible with solar-pro-2 model.',
-											},
-											{
-												name: 'JSON Schema',
-												value: 'json_schema',
-												description:
-													'Generate JSON with custom schema (Structured outputs). Only compatible with solar-pro-2 model.',
-											},
-										],
-										default: 'json_object',
-										description: 'Select the response format type',
-									},
-									{
-										displayName: 'JSON Schema',
-										name: 'json_schema',
-										type: 'json',
-										default: '{}',
-										displayOptions: {
-											show: {
-												format: ['json_schema'],
-											},
-										},
-										description:
-											'The JSON schema object for structured outputs. This will be sent as response_format: {"type": "json_schema", "json_schema": {...your schema...}}',
-									},
-								],
-							},
-						],
 					},
 					{
 						displayName: 'Function Calling',
@@ -505,6 +490,9 @@ export class LmChatModelUpstage implements INodeType {
 			}
 		}
 
+		const responseFormat = this.getNodeParameter('response_format', itemIndex, 'default') as string;
+		const jsonSchema = this.getNodeParameter('json_schema', itemIndex, '{}') as string;
+
 		const options = this.getNodeParameter('options', itemIndex, {}) as {
 			maxTokens?: number;
 			temperature?: number;
@@ -513,12 +501,6 @@ export class LmChatModelUpstage implements INodeType {
 			reasoning_effort?: string;
 			frequencyPenalty?: number;
 			presencePenalty?: number;
-			response_format?: {
-				values?: {
-					format?: string;
-					json_schema?: string;
-				};
-			};
 			function_calling?: {
 				config?: {
 					tools?: {
@@ -604,36 +586,33 @@ export class LmChatModelUpstage implements INodeType {
 		const failureHandler = makeN8nLlmFailedAttemptHandler(this);
 
 		// Handle response_format properly according to Upstage API documentation:
+		// - Default: response_format parameter is not sent (standard text response)
 		// - JSON Mode: {"type": "json_object"}
 		// - Structured outputs: {"type": "json_schema", "json_schema": {...schema...}}
-		// Note: If response_format is not set or empty, default text response is used
-		let responseFormat: IDataObject | undefined;
-		const responseFormatConfig = options.response_format?.values;
-		if (responseFormatConfig?.format) {
-			if (responseFormatConfig.format === 'json_object') {
-				// JSON Mode: Generate JSON object without schema
-				// json_schema field is ignored when format is json_object
-				responseFormat = { type: 'json_object' };
-			} else if (responseFormatConfig.format === 'json_schema') {
-				// Structured outputs: Generate JSON with custom schema
-				if (!responseFormatConfig.json_schema) {
-					throw new Error(
-						'JSON Schema is required when response_format format is set to json_schema'
-					);
-				}
-				try {
-					const schema = JSON.parse(responseFormatConfig.json_schema);
-					responseFormat = {
-						type: 'json_schema',
-						json_schema: schema,
-					};
-				} catch (error) {
-					throw new Error(
-						`Invalid JSON schema provided: ${error instanceof Error ? error.message : String(error)}`
-					);
-				}
+		let responseFormatObj: IDataObject | undefined;
+		if (responseFormat === 'json_object') {
+			// JSON Mode: Generate JSON object without schema
+			responseFormatObj = { type: 'json_object' };
+		} else if (responseFormat === 'json_schema') {
+			// Structured outputs: Generate JSON with custom schema
+			if (!jsonSchema || jsonSchema.trim() === '' || jsonSchema === '{}') {
+				throw new Error(
+					'JSON Schema is required when Response Format is set to "JSON Schema"'
+				);
+			}
+			try {
+				const schema = JSON.parse(jsonSchema);
+				responseFormatObj = {
+					type: 'json_schema',
+					json_schema: schema,
+				};
+			} catch (error) {
+				throw new Error(
+					`Invalid JSON schema provided: ${error instanceof Error ? error.message : String(error)}`
+				);
 			}
 		}
+		// If responseFormat is 'default', responseFormatObj remains undefined and won't be sent
 
 		const modelConfig: ModelConfig = {
 			apiKey: credentials.apiKey as string,
@@ -647,9 +626,9 @@ export class LmChatModelUpstage implements INodeType {
 			presencePenalty: options.presencePenalty,
 		};
 
-		// Add response_format if specified
-		if (responseFormat) {
-			modelConfig.responseFormat = responseFormat;
+		// Add response_format if specified (not empty)
+		if (responseFormatObj) {
+			modelConfig.responseFormat = responseFormatObj;
 		}
 
 		// Add reasoning_effort as model kwargs if specified

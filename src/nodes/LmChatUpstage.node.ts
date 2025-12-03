@@ -151,6 +151,45 @@ export class LmChatUpstage implements INodeType {
 				],
 			},
 			{
+				displayName: 'Response Format',
+				name: 'response_format',
+				type: 'options',
+				options: [
+					{
+						name: 'Text (Default)',
+						value: 'default',
+						description: 'This configuration does not utilise the response format parameter. The response is provided in the standard format.',
+					},
+					{
+						name: 'JSON Object',
+						value: 'json_object',
+						description:
+							'Generate JSON object without schema (JSON Mode). Requires "JSON" in prompt. Only compatible with solar-pro-2 model.',
+					},
+					{
+						name: 'JSON Schema',
+						value: 'json_schema',
+						description:
+							'Generate JSON with custom schema (Structured outputs). Only compatible with solar-pro-2 model.',
+					},
+				],
+				default: 'default',
+				description: 'Format for model output. JSON formats only work with solar-pro-2 model.',
+			},
+			{
+				displayName: 'JSON Schema',
+				name: 'json_schema',
+				type: 'json',
+				default: '{}',
+				displayOptions: {
+					show: {
+						response_format: ['json_schema'],
+					},
+				},
+				description:
+					'The JSON schema object for structured outputs. Required when Response Format is "JSON Schema". This will be sent as response_format: {"type": "json_schema", "json_schema": {...your schema...}}',
+			},
+			{
 				displayName: 'Options',
 				name: 'options',
 				type: 'collection',
@@ -247,61 +286,6 @@ export class LmChatUpstage implements INodeType {
 						},
 						description:
 							'Adjusts tendency to include tokens already present. Positive values encourage new ideas, negative values maintain consistency.',
-					},
-					{
-						displayName: 'Response Format',
-						name: 'response_format',
-						type: 'fixedCollection',
-						default: {},
-						description:
-							'Format for model output. JSON formats only work with solar-pro2 model.',
-						options: [
-							{
-								displayName: 'Response Format',
-								name: 'values',
-								values: [
-									{
-										displayName: 'Format',
-										name: 'format',
-										type: 'options',
-										options: [
-											{
-												name: 'Text (Default)',
-												value: 'text',
-												description: 'Standard text response',
-											},
-											{
-												name: 'JSON Object',
-												value: 'json_object',
-												description:
-													'Generate JSON object (requires "JSON" in prompt)',
-											},
-											{
-												name: 'JSON Schema',
-												value: 'json_schema',
-												description:
-													'Generate JSON with custom schema (structured outputs)',
-											},
-										],
-										default: 'text',
-										description: 'Select the response format type',
-									},
-									{
-										displayName: 'JSON Schema',
-										name: 'json_schema',
-										type: 'json',
-										default: '{}',
-										displayOptions: {
-											show: {
-												format: ['json_schema'],
-											},
-										},
-										description:
-											'JSON schema for structured outputs when using json_schema format',
-									},
-								],
-							},
-						],
 					},
 					{
 						displayName: 'Function Calling',
@@ -433,6 +417,9 @@ export class LmChatUpstage implements INodeType {
 					role: string;
 					content: string;
 				}>;
+				const responseFormat = this.getNodeParameter('response_format', i, 'default') as string;
+				const jsonSchema = this.getNodeParameter('json_schema', i, '{}') as string;
+
 				const options = this.getNodeParameter('options', i, {}) as {
 					temperature?: number;
 					max_tokens?: number;
@@ -441,12 +428,6 @@ export class LmChatUpstage implements INodeType {
 					reasoning_effort?: string;
 					frequency_penalty?: number;
 					presence_penalty?: number;
-					response_format?: {
-						values?: {
-							format?: string;
-							json_schema?: string;
-						};
-					};
 					function_calling?: {
 						config?: {
 							tools?: {
@@ -561,26 +542,33 @@ export class LmChatUpstage implements INodeType {
 					requestBody.tool_choice = toolChoice;
 				}
 
-				// Handle response_format properly
-				const responseFormatConfig = options.response_format?.values;
-				if (responseFormatConfig?.format && responseFormatConfig.format !== 'text') {
-					if (responseFormatConfig.format === 'json_object') {
-						requestBody.response_format = { type: 'json_object' };
-					} else if (
-						responseFormatConfig.format === 'json_schema' &&
-						responseFormatConfig.json_schema
-					) {
-						try {
-							const schema = JSON.parse(responseFormatConfig.json_schema);
-							requestBody.response_format = {
-								type: 'json_schema',
-								json_schema: schema,
-							};
-						} catch (error) {
-							throw new Error('Invalid JSON schema provided');
-						}
+				// Handle response_format properly according to Upstage API documentation:
+				// - Default: response_format parameter is not sent (standard text response)
+				// - JSON Mode: {"type": "json_object"}
+				// - Structured outputs: {"type": "json_schema", "json_schema": {...schema...}}
+				if (responseFormat === 'json_object') {
+					// JSON Mode: Generate JSON object without schema
+					requestBody.response_format = { type: 'json_object' };
+				} else if (responseFormat === 'json_schema') {
+					// Structured outputs: Generate JSON with custom schema
+					if (!jsonSchema || jsonSchema.trim() === '' || jsonSchema === '{}') {
+						throw new Error(
+							'JSON Schema is required when Response Format is set to "JSON Schema"'
+						);
+					}
+					try {
+						const schema = JSON.parse(jsonSchema);
+						requestBody.response_format = {
+							type: 'json_schema',
+							json_schema: schema,
+						};
+					} catch (error) {
+						throw new Error(
+							`Invalid JSON schema provided: ${error instanceof Error ? error.message : String(error)}`
+						);
 					}
 				}
+				// If responseFormat is 'default', response_format parameter is not sent
 
 				// Make API request
 				const requestOptions: IHttpRequestOptions = {
