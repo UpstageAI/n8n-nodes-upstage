@@ -18,7 +18,7 @@
     "copy-assets": "cp src/upstage_v2.svg dist/",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run clean && npm run build",
+    "prepublishOnly": "npm run clean && npm run build && npm run test",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
