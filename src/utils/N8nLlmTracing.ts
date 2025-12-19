@@ -1,15 +1,3 @@
-import { BaseCallbackHandler } from '@langchain/core/callbacks/base';
-import { getModelNameForTiktoken } from '@langchain/core/language_models/base';
-import type { SerializedFields } from '@langchain/core/dist/load/map_keys';
-import type {
-	Serialized,
-	SerializedNotImplemented,
-	SerializedSecret,
-} from '@langchain/core/load/serializable';
-import type { BaseMessage } from '@langchain/core/messages';
-import type { LLMResult } from '@langchain/core/outputs';
-import { encodingForModel } from '@langchain/core/utils/tiktoken';
-import pick from 'lodash/pick';
 import type {
 	IDataObject,
 	ISupplyDataFunctions,
@@ -22,7 +10,45 @@ import {
 } from 'n8n-workflow';
 import { logAiEvent } from './telemetry';
 
-export type TokensUsageParser = (llmOutput: LLMResult['llmOutput']) => {
+/**
+ * LLM output structure for token usage parsing
+ */
+interface LLMOutput {
+	tokenUsage?: {
+		completionTokens?: number;
+		promptTokens?: number;
+		totalTokens?: number;
+		completion_tokens?: number;
+		prompt_tokens?: number;
+		total_tokens?: number;
+	};
+	usage?: {
+		completionTokens?: number;
+		promptTokens?: number;
+		totalTokens?: number;
+		completion_tokens?: number;
+		prompt_tokens?: number;
+		total_tokens?: number;
+	};
+}
+
+/**
+ * Generation result structure
+ */
+interface Generation {
+	text: string;
+	generationInfo?: Record<string, unknown>;
+}
+
+/**
+ * LLM result structure
+ */
+interface LLMResult {
+	generations: Generation[][];
+	llmOutput?: LLMOutput;
+}
+
+export type TokensUsageParser = (llmOutput?: LLMOutput) => {
 	completionTokens: number;
 	promptTokens: number;
 	totalTokens: number;
@@ -30,17 +56,28 @@ export type TokensUsageParser = (llmOutput: LLMResult['llmOutput']) => {
 
 type RunDetail = {
 	index: number;
-	messages: BaseMessage[] | string[] | string;
-	options: SerializedSecret | SerializedNotImplemented | SerializedFields;
+	messages: string[] | string;
+	options: IDataObject;
 };
 
-const TIKTOKEN_ESTIMATE_MODEL = 'gpt-4o';
+/**
+ * Simple token estimation (rough approximation: ~4 characters per token)
+ * This is a fallback when actual token counts are not available
+ */
+function estimateTokens(text: string): number {
+	// Rough approximation: ~4 characters per token for most languages
+	// This is a simple fallback - actual tokenization would require tiktoken or similar
+	return Math.ceil(text.length / 4);
+}
 
-export class N8nLlmTracing extends BaseCallbackHandler {
+/**
+ * Callback handler interface for language model tracing
+ * Compatible with n8n AI Agent nodes
+ */
+export class N8nLlmTracing {
 	name = 'N8nLlmTracing';
 
-	// This flag makes sure that LangChain will wait for the handlers to finish before continuing
-	// This is crucial for the handleLLMError handler to work correctly (it should be called before the error is propagated to the root node)
+	// This flag makes sure that handlers will wait for completion before continuing
 	awaitHandlers = true;
 
 	connectionType = 'ai_languageModel' as NodeConnectionType;
@@ -53,21 +90,30 @@ export class N8nLlmTracing extends BaseCallbackHandler {
 	 * A map to associate LLM run IDs to run details.
 	 * Key: Unique identifier for each LLM run (run ID)
 	 * Value: RunDetails object
-	 *
 	 */
 	runsMap: Record<string, RunDetail> = {};
 
 	options = {
-		// Default(OpenAI format) parser
-		tokensUsageParser: (llmOutput: LLMResult['llmOutput']) => {
+		// Default parser for token usage
+		tokensUsageParser: (llmOutput?: LLMOutput) => {
+			const usage = llmOutput?.tokenUsage || llmOutput?.usage;
 			const completionTokens =
-				(llmOutput?.tokenUsage?.completionTokens as number) ?? 0;
-			const promptTokens = (llmOutput?.tokenUsage?.promptTokens as number) ?? 0;
+				(usage?.completionTokens as number) ??
+				(usage?.completion_tokens as number) ??
+				0;
+			const promptTokens =
+				(usage?.promptTokens as number) ??
+				(usage?.prompt_tokens as number) ??
+				0;
+			const totalTokens =
+				(usage?.totalTokens as number) ??
+				(usage?.total_tokens as number) ??
+				completionTokens + promptTokens;
 
 			return {
 				completionTokens,
 				promptTokens,
-				totalTokens: completionTokens + promptTokens,
+				totalTokens,
 			};
 		},
 		errorDescriptionMapper: (error: NodeError) => error.description,
@@ -80,35 +126,45 @@ export class N8nLlmTracing extends BaseCallbackHandler {
 			errorDescriptionMapper?: (error: NodeError) => string;
 		}
 	) {
-		super();
 		this.options = { ...this.options, ...options };
 	}
 
-	async estimateTokensFromGeneration(generations: LLMResult['generations']) {
+	/**
+	 * Estimate tokens from generation results
+	 */
+	async estimateTokensFromGeneration(
+		generations: Generation[][]
+	): Promise<number> {
 		const messages = generations.flatMap(gen => gen.map(g => g.text));
-		return await this.estimateTokensFromStringList(messages);
+		return this.estimateTokensFromStringList(messages);
 	}
 
-	async estimateTokensFromStringList(list: string[]) {
-		const embeddingModel = getModelNameForTiktoken(TIKTOKEN_ESTIMATE_MODEL);
-		const encoder = await encodingForModel(embeddingModel);
-
-		const encodedListLength = await Promise.all(
-			list.map(async text => encoder.encode(text).length)
-		);
-
-		return encodedListLength.reduce((acc, curr) => acc + curr, 0);
+	/**
+	 * Estimate tokens from a list of strings
+	 * Uses simple character-based estimation as fallback
+	 */
+	async estimateTokensFromStringList(list: string[]): Promise<number> {
+		return list.reduce((acc, text) => acc + estimateTokens(text), 0);
 	}
 
-	async handleLLMEnd(output: LLMResult, runId: string) {
+	/**
+	 * Handle LLM end event
+	 */
+	async handleLLMEnd(output: LLMResult, runId: string): Promise<void> {
 		// The fallback should never happen since handleLLMStart should always set the run details
 		// but just in case, we set the index to the length of the runsMap
 		const runDetails = this.runsMap[runId] ?? {
 			index: Object.keys(this.runsMap).length,
+			messages: [],
+			options: {},
 		};
 
-		output.generations = output.generations.map(gen =>
-			gen.map(g => pick(g, ['text', 'generationInfo']))
+		// Extract only text and generationInfo from generations
+		const processedGenerations = output.generations.map(gen =>
+			gen.map(g => ({
+				text: g.text,
+				generationInfo: g.generationInfo,
+			}))
 		);
 
 		const tokenUsageEstimate = {
@@ -118,20 +174,20 @@ export class N8nLlmTracing extends BaseCallbackHandler {
 		};
 		const tokenUsage = this.options.tokensUsageParser(output.llmOutput);
 
-		if (output.generations.length > 0) {
+		if (processedGenerations.length > 0) {
 			tokenUsageEstimate.completionTokens =
-				await this.estimateTokensFromGeneration(output.generations);
+				await this.estimateTokensFromGeneration(processedGenerations);
 
 			tokenUsageEstimate.promptTokens = this.promptTokensEstimate;
 			tokenUsageEstimate.totalTokens =
 				tokenUsageEstimate.completionTokens + this.promptTokensEstimate;
 		}
 		const response: {
-			response: { generations: LLMResult['generations'] };
+			response: { generations: typeof processedGenerations };
 			tokenUsageEstimate?: typeof tokenUsageEstimate;
 			tokenUsage?: typeof tokenUsage;
 		} = {
-			response: { generations: output.generations },
+			response: { generations: processedGenerations },
 		};
 
 		// If the LLM response contains actual tokens usage, otherwise fallback to the estimate
@@ -144,12 +200,21 @@ export class N8nLlmTracing extends BaseCallbackHandler {
 		const parsedMessages =
 			typeof runDetails.messages === 'string'
 				? runDetails.messages
-				: runDetails.messages.map(message => {
-						if (typeof message === 'string') return message;
-						if (typeof message?.toJSON === 'function') return message.toJSON();
-
-						return message;
-					});
+				: Array.isArray(runDetails.messages)
+					? runDetails.messages.map(message => {
+							if (typeof message === 'string') return message;
+							if (
+								typeof message === 'object' &&
+								message !== null &&
+								'toJSON' in message &&
+								typeof (message as { toJSON: () => unknown }).toJSON ===
+									'function'
+							) {
+								return (message as { toJSON: () => unknown }).toJSON();
+							}
+							return message;
+						})
+					: [];
 
 		this.executionFunctions.addOutputData(
 			this.connectionType,
@@ -164,10 +229,24 @@ export class N8nLlmTracing extends BaseCallbackHandler {
 		});
 	}
 
-	async handleLLMStart(llm: Serialized, prompts: string[], runId: string) {
+	/**
+	 * Handle LLM start event
+	 */
+	async handleLLMStart(
+		llm: IDataObject | { type?: string; kwargs?: IDataObject },
+		prompts: string[],
+		runId: string
+	): Promise<void> {
 		const estimatedTokens = await this.estimateTokensFromStringList(prompts);
 
-		const options = llm.type === 'constructor' ? llm.kwargs : llm;
+		const options =
+			typeof llm === 'object' &&
+			llm !== null &&
+			'type' in llm &&
+			llm.type === 'constructor'
+				? (llm.kwargs as IDataObject) || {}
+				: (llm as IDataObject);
+
 		const { index } = this.executionFunctions.addInputData(
 			this.connectionType,
 			[
@@ -192,18 +271,24 @@ export class N8nLlmTracing extends BaseCallbackHandler {
 		this.promptTokensEstimate = estimatedTokens;
 	}
 
+	/**
+	 * Handle LLM error event
+	 */
 	async handleLLMError(
 		error: IDataObject | Error,
 		runId: string,
 		parentRunId?: string | undefined
-	) {
+	): Promise<void> {
 		const runDetails = this.runsMap[runId] ?? {
 			index: Object.keys(this.runsMap).length,
+			messages: [],
+			options: {},
 		};
 
 		// Filter out non-x- headers to avoid leaking sensitive information in logs
 		if (
 			typeof error === 'object' &&
+			error !== null &&
 			Object.prototype.hasOwnProperty.call(error, 'headers')
 		) {
 			const errorWithHeaders = error as { headers: Record<string, unknown> };
@@ -241,7 +326,10 @@ export class N8nLlmTracing extends BaseCallbackHandler {
 		}
 
 		logAiEvent(this.executionFunctions, 'ai-llm-errored', {
-			error: Object.keys(error).length === 0 ? error.toString() : error,
+			error:
+				typeof error === 'object' && Object.keys(error).length === 0
+					? String(error)
+					: error,
 			runId,
 			parentRunId,
 		});
