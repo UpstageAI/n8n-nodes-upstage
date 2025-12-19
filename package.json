@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-upstage",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Upstage LLM and Embeddings nodes for n8n",
   "license": "MIT",
   "homepage": "https://github.com/UpstageAI/n8n-nodes-upstage",
@@ -62,7 +62,6 @@
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
-    "@types/lodash": "^4.17.20",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "7.18.0",
     "@typescript-eslint/parser": "7.18.0",
@@ -77,7 +76,6 @@
     "typescript": "^5.0.0"
   },
   "peerDependencies": {
-    "lodash": ">=4.17.0",
     "n8n-core": ">=1.0.0",
     "n8n-workflow": ">=1.0.0"
   },
@@ -88,13 +86,5 @@
   "bugs": {
     "url": "https://github.com/UpstageAI/n8n-nodes-upstage/issues"
   },
-  "dependencies": {
-    "@langchain/core": "^0.3.72",
-    "@langchain/openai": "^0.6.9",
-    "@n8n/json-schema-to-zod": "^1.6.0",
-    "https-proxy-agent": "^7.0.0"
-  },
-  "overrides": {
-    "axios": "^1.12.0"
-  }
+  "dependencies": {}
 }
