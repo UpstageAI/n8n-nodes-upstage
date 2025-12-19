@@ -1,4 +1,3 @@
-import { ChatOpenAI } from '@langchain/openai';
 import {
 	type INodeType,
 	type INodeTypeDescription,
@@ -7,6 +6,7 @@ import {
 	type ILoadOptionsFunctions,
 	type INodePropertyOptions,
 	type IDataObject,
+	type IHttpRequestOptions,
 } from 'n8n-workflow';
 import { N8nLlmTracing, type TokensUsageParser } from '../utils/N8nLlmTracing';
 import { makeN8nLlmFailedAttemptHandler } from '../utils/n8nLlmFailedAttemptHandler';
@@ -23,17 +23,358 @@ interface ModelListResponse {
 	data: ModelOption[];
 }
 
-interface ModelConfig extends IDataObject {
-	apiKey: string;
+/**
+ * Message interface compatible with n8n AI Agent nodes
+ */
+interface Message {
+	role: 'system' | 'user' | 'assistant' | 'tool';
+	content: string | null;
+	tool_calls?: Array<{
+		id: string;
+		type: 'function';
+		function: {
+			name: string;
+			arguments: string;
+		};
+	}>;
+	tool_call_id?: string;
+}
+
+/**
+ * Tool interface for function calling
+ */
+interface Tool {
+	type: 'function';
+	function: {
+		name: string;
+		description: string;
+		parameters: Record<string, unknown>;
+	};
+}
+
+/**
+ * Tool choice configuration
+ */
+type ToolChoice =
+	| 'auto'
+	| 'none'
+	| 'required'
+	| { type: 'function'; function: { name: string } };
+
+/**
+ * Language Model interface compatible with n8n AI Agent nodes
+ */
+interface LanguageModel {
+	invoke(messages: Message[]): Promise<Message>;
+	stream?(messages: Message[]): AsyncIterable<Message>;
+	bindTools?(tools: Tool[]): LanguageModel;
+}
+
+/**
+ * Upstage API Chat Request Body
+ */
+interface ChatRequestBody extends IDataObject {
 	model: string;
-	configuration: IDataObject;
-	maxTokens?: number;
+	messages: Array<{
+		role: 'system' | 'user' | 'assistant' | 'tool';
+		content: string | null;
+		tool_calls?: Array<{
+			id: string;
+			type: 'function';
+			function: {
+				name: string;
+				arguments: string;
+			};
+		}>;
+		tool_call_id?: string;
+	}>;
 	temperature?: number;
-	streaming?: boolean;
-	topP?: number;
-	frequencyPenalty?: number;
-	presencePenalty?: number;
-	responseFormat?: IDataObject;
+	max_tokens?: number;
+	top_p?: number;
+	stream?: boolean;
+	reasoning_effort?: string;
+	frequency_penalty?: number;
+	presence_penalty?: number;
+	response_format?: IDataObject;
+	tools?: Tool[];
+	tool_choice?: ToolChoice;
+}
+
+/**
+ * Upstage API Chat Response
+ */
+interface ChatResponse {
+	id: string;
+	object: string;
+	created: number;
+	model: string;
+	choices: Array<{
+		index: number;
+		message: {
+			role: 'assistant';
+			content: string | null;
+			tool_calls?: Array<{
+				id: string;
+				type: 'function';
+				function: {
+					name: string;
+					arguments: string;
+				};
+			}>;
+		};
+		finish_reason: string;
+	}>;
+	usage?: {
+		prompt_tokens: number;
+		completion_tokens: number;
+		total_tokens: number;
+	};
+}
+
+/**
+ * Upstage Language Model implementation (LangChain-free)
+ */
+class UpstageLanguageModel implements LanguageModel {
+	private apiKey: string;
+	private model: string;
+	private baseURL: string;
+	private temperature?: number;
+	private maxTokens?: number;
+	private topP?: number;
+	private streaming?: boolean;
+	private reasoningEffort?: string;
+	private frequencyPenalty?: number;
+	private presencePenalty?: number;
+	private responseFormat?: IDataObject;
+	private boundTools?: Tool[];
+	private toolChoice?: ToolChoice;
+	private tracing?: N8nLlmTracing;
+	private onFailedAttempt?: ReturnType<typeof makeN8nLlmFailedAttemptHandler>;
+	private httpRequest: (
+		url: string,
+		options: IHttpRequestOptions
+	) => Promise<ChatResponse>;
+
+	constructor(config: {
+		apiKey: string;
+		model: string;
+		baseURL?: string;
+		temperature?: number;
+		maxTokens?: number;
+		topP?: number;
+		streaming?: boolean;
+		reasoningEffort?: string;
+		frequencyPenalty?: number;
+		presencePenalty?: number;
+		responseFormat?: IDataObject;
+		tools?: Tool[];
+		toolChoice?: ToolChoice;
+		callbacks?: N8nLlmTracing[];
+		onFailedAttempt?: ReturnType<typeof makeN8nLlmFailedAttemptHandler>;
+		httpRequest: (
+			url: string,
+			options: IHttpRequestOptions
+		) => Promise<ChatResponse>;
+	}) {
+		this.apiKey = config.apiKey;
+		this.model = config.model;
+		this.baseURL = config.baseURL ?? 'https://api.upstage.ai/v1';
+		this.temperature = config.temperature;
+		this.maxTokens = config.maxTokens;
+		this.topP = config.topP;
+		this.streaming = config.streaming;
+		this.reasoningEffort = config.reasoningEffort;
+		this.frequencyPenalty = config.frequencyPenalty;
+		this.presencePenalty = config.presencePenalty;
+		this.responseFormat = config.responseFormat;
+		this.boundTools = config.tools;
+		this.toolChoice = config.toolChoice;
+		this.tracing = config.callbacks?.[0];
+		this.onFailedAttempt = config.onFailedAttempt;
+		this.httpRequest = config.httpRequest;
+	}
+
+	async invoke(messages: Message[]): Promise<Message> {
+		const runId = `run_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+		try {
+			// Convert messages to Upstage API format
+			const apiMessages = messages.map(msg => ({
+				role: msg.role,
+				content: msg.content,
+				...(msg.tool_calls && { tool_calls: msg.tool_calls }),
+				...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }),
+			}));
+
+			// Build request body
+			const requestBody: ChatRequestBody = {
+				model: this.model,
+				messages: apiMessages,
+			};
+
+			if (this.temperature !== undefined) {
+				requestBody.temperature = this.temperature;
+			}
+			if (this.maxTokens !== undefined && this.maxTokens > 0) {
+				requestBody.max_tokens = this.maxTokens;
+			}
+			if (this.topP !== undefined) {
+				requestBody.top_p = this.topP;
+			}
+			if (this.streaming !== undefined) {
+				requestBody.stream = this.streaming;
+			}
+			if (this.reasoningEffort) {
+				requestBody.reasoning_effort = this.reasoningEffort;
+			}
+			if (this.frequencyPenalty !== undefined) {
+				requestBody.frequency_penalty = this.frequencyPenalty;
+			}
+			if (this.presencePenalty !== undefined) {
+				requestBody.presence_penalty = this.presencePenalty;
+			}
+			if (this.responseFormat) {
+				requestBody.response_format = this.responseFormat;
+			}
+
+			// Add tools if bound
+			if (this.boundTools && this.boundTools.length > 0) {
+				requestBody.tools = this.boundTools;
+				requestBody.tool_choice = this.toolChoice ?? 'auto';
+			}
+
+			// Call tracing start handler
+			if (this.tracing) {
+				const prompts = messages
+					.map(msg => (typeof msg.content === 'string' ? msg.content : ''))
+					.filter(p => p.length > 0);
+				await this.tracing.handleLLMStart(
+					{
+						type: 'constructor',
+						kwargs: {
+							model: this.model,
+							temperature: this.temperature,
+							maxTokens: this.maxTokens,
+						},
+					},
+					prompts,
+					runId
+				);
+			}
+
+			// Make API request
+			const requestOptions: IHttpRequestOptions = {
+				method: 'POST',
+				url: `${this.baseURL}/chat/completions`,
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bearer ${this.apiKey}`,
+				},
+				body: requestBody,
+				json: true,
+			};
+
+			let response: ChatResponse;
+			try {
+				response = await this.httpRequest(
+					`${this.baseURL}/chat/completions`,
+					requestOptions
+				);
+			} catch (error) {
+				// Handle retry logic if onFailedAttempt is provided
+				if (this.onFailedAttempt) {
+					const retryableError = error as Error & {
+						code?: string;
+						status?: number;
+						retriesLeft?: number;
+					};
+					this.onFailedAttempt(retryableError);
+				}
+				throw error;
+			}
+
+			// Extract response message
+			const choice = response.choices?.[0];
+			if (!choice || !choice.message) {
+				throw new Error('Invalid response format from Upstage API');
+			}
+
+			const responseMessage: Message = {
+				role: 'assistant',
+				content: choice.message.content,
+				...(choice.message.tool_calls && {
+					tool_calls: choice.message.tool_calls,
+				}),
+			};
+
+			// Call tracing end handler
+			if (this.tracing) {
+				await this.tracing.handleLLMEnd(
+					{
+						generations: [
+							[
+								{
+									text: choice.message.content || '',
+									generationInfo: {
+										finish_reason: choice.finish_reason,
+									},
+								},
+							],
+						],
+						llmOutput: {
+							tokenUsage: response.usage
+								? {
+										promptTokens: response.usage.prompt_tokens,
+										completionTokens: response.usage.completion_tokens,
+										totalTokens: response.usage.total_tokens,
+									}
+								: undefined,
+						},
+					},
+					runId
+				);
+			}
+
+			return responseMessage;
+		} catch (error) {
+			// Call tracing error handler
+			if (this.tracing) {
+				await this.tracing.handleLLMError(error as IDataObject | Error, runId);
+			}
+			throw error;
+		}
+	}
+
+	stream?(messages: Message[]): AsyncIterable<Message> {
+		// Streaming is not fully supported in n8n community nodes
+		// Return a simple async generator that calls invoke
+		return async function* (this: UpstageLanguageModel) {
+			const result = await this.invoke(messages);
+			yield result;
+		}.call(this);
+	}
+
+	bindTools?(tools: Tool[]): LanguageModel {
+		// Create a new instance with tools bound
+		return new UpstageLanguageModel({
+			apiKey: this.apiKey,
+			model: this.model,
+			baseURL: this.baseURL,
+			temperature: this.temperature,
+			maxTokens: this.maxTokens,
+			topP: this.topP,
+			streaming: this.streaming,
+			reasoningEffort: this.reasoningEffort,
+			frequencyPenalty: this.frequencyPenalty,
+			presencePenalty: this.presencePenalty,
+			responseFormat: this.responseFormat,
+			tools,
+			toolChoice: this.toolChoice,
+			callbacks: this.tracing ? [this.tracing] : undefined,
+			onFailedAttempt: this.onFailedAttempt,
+			httpRequest: this.httpRequest,
+		});
+	}
 }
 
 export class LmChatModelUpstage implements INodeType {
@@ -138,7 +479,8 @@ export class LmChatModelUpstage implements INodeType {
 					{
 						name: 'Text (Default)',
 						value: 'default',
-						description: 'This configuration does not utilise the response format parameter. The response is provided in the standard format.',
+						description:
+							'This configuration does not utilise the response format parameter. The response is provided in the standard format.',
 					},
 					{
 						name: 'JSON Object',
@@ -154,7 +496,8 @@ export class LmChatModelUpstage implements INodeType {
 					},
 				],
 				default: 'default',
-				description: 'Format for model output. JSON formats only work with solar-pro-2 model.',
+				description:
+					'Format for model output. JSON formats only work with solar-pro-2 model.',
 			},
 			{
 				displayName: 'JSON Schema',
@@ -382,8 +725,9 @@ export class LmChatModelUpstage implements INodeType {
 				this: ILoadOptionsFunctions
 			): Promise<INodePropertyOptions[]> {
 				const credentials = await this.getCredentials('upstageApi');
-				const requestOptions = {
-					method: 'GET' as const,
+				const requestOptions: IHttpRequestOptions = {
+					method: 'GET',
+					url: 'https://api.upstage.ai/v1/models',
 					headers: {
 						Authorization: `Bearer ${credentials.apiKey}`,
 						'Content-Type': 'application/json',
@@ -391,10 +735,7 @@ export class LmChatModelUpstage implements INodeType {
 				};
 
 				try {
-					const response = await this.helpers.request(
-						'https://api.upstage.ai/v1/models',
-						requestOptions
-					);
+					const response = await this.helpers.httpRequest(requestOptions);
 
 					if (!response?.data || !Array.isArray(response.data)) {
 						this.logger.warn('Invalid response format from models API');
@@ -447,18 +788,16 @@ export class LmChatModelUpstage implements INodeType {
 
 		if (!modelName) {
 			try {
-				const requestOptions = {
-					method: 'GET' as const,
+				const requestOptions: IHttpRequestOptions = {
+					method: 'GET',
+					url: 'https://api.upstage.ai/v1/models',
 					headers: {
 						Authorization: `Bearer ${credentials.apiKey}`,
 						'Content-Type': 'application/json',
 					},
 				};
 
-				const response = await this.helpers.request(
-					'https://api.upstage.ai/v1/models',
-					requestOptions
-				);
+				const response = await this.helpers.httpRequest(requestOptions);
 
 				if (response?.data && Array.isArray(response.data)) {
 					const solarModels = response.data
@@ -490,8 +829,16 @@ export class LmChatModelUpstage implements INodeType {
 			}
 		}
 
-		const responseFormat = this.getNodeParameter('response_format', itemIndex, 'default') as string;
-		const jsonSchema = this.getNodeParameter('json_schema', itemIndex, '{}') as string;
+		const responseFormat = this.getNodeParameter(
+			'response_format',
+			itemIndex,
+			'default'
+		) as string;
+		const jsonSchema = this.getNodeParameter(
+			'json_schema',
+			itemIndex,
+			'{}'
+		) as string;
 
 		const options = this.getNodeParameter('options', itemIndex, {}) as {
 			maxTokens?: number;
@@ -515,75 +862,6 @@ export class LmChatModelUpstage implements INodeType {
 				};
 			};
 		};
-
-		const configuration = {
-			baseURL: 'https://api.upstage.ai/v1',
-			// Note: Proxy configuration should be handled at the n8n instance level
-			// Users should configure proxy through n8n's global settings
-			defaultHeaders: {
-				'Content-Type': 'application/json',
-			},
-		};
-
-		const upstageTokensParser: TokensUsageParser = llmOutput => {
-			if (!llmOutput || typeof llmOutput !== 'object') {
-				return {
-					completionTokens: 0,
-					promptTokens: 0,
-					totalTokens: 0,
-				};
-			}
-			const llmOutputObj = llmOutput as Record<string, unknown>;
-			const usage = llmOutputObj?.tokenUsage || llmOutputObj?.usage;
-			if (usage && typeof usage === 'object') {
-				const usageObj = usage as Record<string, unknown>;
-				const completionTokens =
-					(typeof usageObj.completion_tokens === 'number'
-						? usageObj.completion_tokens
-						: 0) ||
-					(typeof usageObj.completionTokens === 'number'
-						? usageObj.completionTokens
-						: 0) ||
-					0;
-				const promptTokens =
-					(typeof usageObj.prompt_tokens === 'number'
-						? usageObj.prompt_tokens
-						: 0) ||
-					(typeof usageObj.promptTokens === 'number'
-						? usageObj.promptTokens
-						: 0) ||
-					0;
-				const totalTokens =
-					(typeof usageObj.total_tokens === 'number'
-						? usageObj.total_tokens
-						: 0) ||
-					(typeof usageObj.totalTokens === 'number'
-						? usageObj.totalTokens
-						: 0) ||
-					completionTokens + promptTokens;
-
-				// Token usage logging removed (use n8n logger in tracing if needed)
-
-				return {
-					completionTokens,
-					promptTokens,
-					totalTokens,
-				};
-			}
-
-			// No token usage data found (logging removed)
-			return {
-				completionTokens: 0,
-				promptTokens: 0,
-				totalTokens: 0,
-			};
-		};
-
-		// Create tracing and failure handler using our implementations
-		const tracing = new N8nLlmTracing(this, {
-			tokensUsageParser: upstageTokensParser,
-		});
-		const failureHandler = makeN8nLlmFailedAttemptHandler(this);
 
 		// Handle response_format properly according to Upstage API documentation:
 		// - Default: response_format parameter is not sent (standard text response)
@@ -614,35 +892,15 @@ export class LmChatModelUpstage implements INodeType {
 		}
 		// If responseFormat is 'default', responseFormatObj remains undefined and won't be sent
 
-		const modelConfig: ModelConfig = {
-			apiKey: credentials.apiKey as string,
-			model: modelName, // Use 'model' instead of 'modelName' for better API compatibility
-			configuration: configuration as IDataObject,
-			maxTokens: options.maxTokens,
-			temperature: options.temperature,
-			streaming: options.streaming || false,
-			topP: options.topP,
-			frequencyPenalty: options.frequencyPenalty,
-			presencePenalty: options.presencePenalty,
-		};
-
-		// Add response_format if specified (not empty)
-		if (responseFormatObj) {
-			modelConfig.responseFormat = responseFormatObj;
-		}
-
-		// Add reasoning_effort as model kwargs if specified
-		if (options.reasoning_effort) {
-			modelConfig.modelKwargs = {
-				...(modelConfig.modelKwargs as Record<string, unknown> || {}),
-				reasoning_effort: options.reasoning_effort,
-			};
-		}
-
 		// Process function_calling tools if provided
+		let tools: Tool[] | undefined;
+		let toolChoice: ToolChoice | undefined;
 		const functionCallingConfig = options.function_calling?.config;
-		if (functionCallingConfig?.tools?.tool && functionCallingConfig.tools.tool.length > 0) {
-			const tools = functionCallingConfig.tools.tool.map(toolRaw => {
+		if (
+			functionCallingConfig?.tools?.tool &&
+			functionCallingConfig.tools.tool.length > 0
+		) {
+			tools = functionCallingConfig.tools.tool.map(toolRaw => {
 				const parameters =
 					typeof toolRaw.parameters === 'string'
 						? JSON.parse(toolRaw.parameters)
@@ -652,38 +910,120 @@ export class LmChatModelUpstage implements INodeType {
 					function: {
 						name: toolRaw.name,
 						description: toolRaw.description,
-						parameters,
+						parameters: parameters as Record<string, unknown>,
 					},
 				};
 			});
-			modelConfig.tools = tools;
 
 			// Handle tool_choice
 			const toolChoiceRaw = functionCallingConfig.tool_choice || 'auto';
 			if (toolChoiceRaw === 'specific') {
 				const functionName = functionCallingConfig.function_name;
 				if (functionName) {
-					modelConfig.toolChoice = {
+					toolChoice = {
 						type: 'function',
 						function: { name: functionName },
 					};
+				} else {
+					toolChoice = 'auto';
 				}
-			} else if (toolChoiceRaw !== 'auto') {
-				modelConfig.toolChoice = toolChoiceRaw;
+			} else {
+				toolChoice = toolChoiceRaw as 'auto' | 'none' | 'required';
 			}
 		}
 
-		// Add tracing callbacks if available (when installed in n8n core)
-		if (tracing) {
-			modelConfig.callbacks = [tracing];
-		}
+		// Create tracing and failure handler
+		const upstageTokensParser: TokensUsageParser = llmOutput => {
+			if (!llmOutput || typeof llmOutput !== 'object') {
+				return {
+					completionTokens: 0,
+					promptTokens: 0,
+					totalTokens: 0,
+				};
+			}
+			const usage = llmOutput?.tokenUsage || llmOutput?.usage;
+			if (usage && typeof usage === 'object') {
+				const usageObj = usage as Record<string, unknown>;
+				const completionTokens =
+					(typeof usageObj.completionTokens === 'number'
+						? usageObj.completionTokens
+						: 0) ||
+					(typeof usageObj.completion_tokens === 'number'
+						? usageObj.completion_tokens
+						: 0) ||
+					0;
+				const promptTokens =
+					(typeof usageObj.promptTokens === 'number'
+						? usageObj.promptTokens
+						: 0) ||
+					(typeof usageObj.prompt_tokens === 'number'
+						? usageObj.prompt_tokens
+						: 0) ||
+					0;
+				const totalTokens =
+					(typeof usageObj.totalTokens === 'number'
+						? usageObj.totalTokens
+						: 0) ||
+					(typeof usageObj.total_tokens === 'number'
+						? usageObj.total_tokens
+						: 0) ||
+					completionTokens + promptTokens;
 
-		// Add failure handler if available
-		if (failureHandler) {
-			modelConfig.onFailedAttempt = failureHandler;
-		}
+				return {
+					completionTokens,
+					promptTokens,
+					totalTokens,
+				};
+			}
 
-		const model = new ChatOpenAI(modelConfig);
+			return {
+				completionTokens: 0,
+				promptTokens: 0,
+				totalTokens: 0,
+			};
+		};
+
+		const tracing = new N8nLlmTracing(this, {
+			tokensUsageParser: upstageTokensParser,
+		});
+		const failureHandler = makeN8nLlmFailedAttemptHandler(this);
+
+		// Create HTTP request wrapper using n8n's helpers
+		const httpRequest = async (
+			url: string,
+			requestOptions: IHttpRequestOptions
+		): Promise<ChatResponse> => {
+			// Use n8n's httpRequestWithAuthentication helper
+			const response = await this.helpers.httpRequestWithAuthentication.call(
+				this,
+				'upstageApi',
+				requestOptions
+			);
+			return response as ChatResponse;
+		};
+
+		// Create the language model instance
+		const model = new UpstageLanguageModel({
+			apiKey: credentials.apiKey as string,
+			model: modelName,
+			baseURL: 'https://api.upstage.ai/v1',
+			temperature: options.temperature,
+			maxTokens:
+				options.maxTokens && options.maxTokens > 0
+					? options.maxTokens
+					: undefined,
+			topP: options.topP,
+			streaming: options.streaming || false,
+			reasoningEffort: options.reasoning_effort,
+			frequencyPenalty: options.frequencyPenalty,
+			presencePenalty: options.presencePenalty,
+			responseFormat: responseFormatObj,
+			tools,
+			toolChoice,
+			callbacks: [tracing],
+			onFailedAttempt: failureHandler,
+			httpRequest,
+		});
 
 		// Tools are managed by the AI Agent node, not here
 		return {
