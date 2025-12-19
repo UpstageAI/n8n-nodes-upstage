@@ -86,7 +86,7 @@ export class EmbeddingsUpstageModel implements INodeType {
 		const credentials = await this.getCredentials('upstageApi');
 		const model = this.getNodeParameter('model', itemIndex) as string;
 
-		// Create a custom embedding model that implements LangChain's interface
+		// Create a custom embedding model that implements the Embeddings interface
 		const embeddingModel = new UpstageEmbeddings({
 			apiKey: credentials.apiKey as string,
 			model,
@@ -132,67 +132,63 @@ export async function callMethodAsync<T>(
 }
 
 /**
- * Wraps LangChain Embeddings instance to integrate with n8n data flow
+ * Wraps Embeddings instance to integrate with n8n data flow
  * Adds input/output data tracking and telemetry logging
  * @internal Exported for testing purposes
  */
-export function logWrapper<T extends Embeddings>(
+export function logWrapper<T extends EmbeddingsInterface>(
 	originalInstance: T,
 	executeFunctions: IExecuteFunctions | ISupplyDataFunctions
 ): T {
 	return new Proxy(originalInstance, {
 		get: (target, prop) => {
 			// ========== Embeddings ==========
-			if (originalInstance instanceof Embeddings) {
-				// Docs -> Embeddings
-				if (prop === 'embedDocuments' && 'embedDocuments' in target) {
-					return async (documents: string[]): Promise<number[][]> => {
-						const connectionType = 'ai_embedding';
-						const { index } = executeFunctions.addInputData(connectionType, [
-							[{ json: { documents } }],
-						]);
+			// Docs -> Embeddings
+			if (prop === 'embedDocuments' && 'embedDocuments' in target) {
+				return async (documents: string[]): Promise<number[][]> => {
+					const connectionType = 'ai_embedding';
+					const { index } = executeFunctions.addInputData(connectionType, [
+						[{ json: { documents } }],
+					]);
 
-						const response = (await callMethodAsync.call(target, {
-							executeFunctions,
-							connectionType,
-							currentNodeRunIndex: index,
-							method: target[prop] as (
-								...args: MethodArgs
-							) => Promise<number[][]>,
-							arguments: [documents],
-						})) as number[][];
+					const response = (await callMethodAsync.call(target, {
+						executeFunctions,
+						connectionType,
+						currentNodeRunIndex: index,
+						method: target[prop] as (
+							...args: MethodArgs
+						) => Promise<number[][]>,
+						arguments: [documents],
+					})) as number[][];
 
-						logAiEvent(executeFunctions, 'ai-document-embedded');
-						executeFunctions.addOutputData(connectionType, index, [
-							[{ json: { response } }],
-						]);
-						return response;
-					};
-				}
-				// Query -> Embeddings
-				if (prop === 'embedQuery' && 'embedQuery' in target) {
-					return async (query: string): Promise<number[]> => {
-						const connectionType = 'ai_embedding';
-						const { index } = executeFunctions.addInputData(connectionType, [
-							[{ json: { query } }],
-						]);
+					logAiEvent(executeFunctions, 'ai-document-embedded');
+					executeFunctions.addOutputData(connectionType, index, [
+						[{ json: { response } }],
+					]);
+					return response;
+				};
+			}
+			// Query -> Embeddings
+			if (prop === 'embedQuery' && 'embedQuery' in target) {
+				return async (query: string): Promise<number[]> => {
+					const connectionType = 'ai_embedding';
+					const { index } = executeFunctions.addInputData(connectionType, [
+						[{ json: { query } }],
+					]);
 
-						const response = (await callMethodAsync.call(target, {
-							executeFunctions,
-							connectionType,
-							currentNodeRunIndex: index,
-							method: target[prop] as (
-								...args: MethodArgs
-							) => Promise<number[]>,
-							arguments: [query],
-						})) as number[];
-						logAiEvent(executeFunctions, 'ai-query-embedded');
-						executeFunctions.addOutputData(connectionType, index, [
-							[{ json: { response } }],
-						]);
-						return response;
-					};
-				}
+					const response = (await callMethodAsync.call(target, {
+						executeFunctions,
+						connectionType,
+						currentNodeRunIndex: index,
+						method: target[prop] as (...args: MethodArgs) => Promise<number[]>,
+						arguments: [query],
+					})) as number[];
+					logAiEvent(executeFunctions, 'ai-query-embedded');
+					executeFunctions.addOutputData(connectionType, index, [
+						[{ json: { response } }],
+					]);
+					return response;
+				};
 			}
 
 			// eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any
@@ -201,10 +197,8 @@ export function logWrapper<T extends Embeddings>(
 	});
 }
 
-// Custom LangChain Embeddings implementation for Upstage Solar
-import { Embeddings, EmbeddingsParams } from '@langchain/core/embeddings';
-
-interface UpstageEmbeddingsParams extends EmbeddingsParams {
+// Custom Embeddings implementation for Upstage Solar (LangChain-free)
+interface UpstageEmbeddingsParams {
 	apiKey: string;
 	model: string;
 	baseURL?: string;
@@ -212,7 +206,15 @@ interface UpstageEmbeddingsParams extends EmbeddingsParams {
 	stripNewLines?: boolean;
 }
 
-class UpstageEmbeddings extends Embeddings {
+/**
+ * Embeddings interface compatible with n8n AI Vector Store nodes
+ */
+interface EmbeddingsInterface {
+	embedDocuments(texts: string[]): Promise<number[][]>;
+	embedQuery(text: string): Promise<number[]>;
+}
+
+class UpstageEmbeddings implements EmbeddingsInterface {
 	public apiKey: string;
 	public model: string;
 	public baseURL: string;
@@ -220,15 +222,13 @@ class UpstageEmbeddings extends Embeddings {
 	public stripNewLines: boolean;
 
 	constructor(fields: UpstageEmbeddingsParams) {
-		const { apiKey, model, baseURL, batchSize, stripNewLines, ...rest } =
-			fields;
-		super(rest);
+		const { apiKey, model, baseURL, batchSize, stripNewLines } = fields;
 
 		this.apiKey = apiKey;
 		this.model = model;
 		this.baseURL = baseURL ?? 'https://api.upstage.ai/v1';
 		this.batchSize = batchSize ?? 100; // Upstage API limit
-		this.stripNewLines = stripNewLines ?? true; // LangChain default
+		this.stripNewLines = stripNewLines ?? true;
 	}
 
 	/**
