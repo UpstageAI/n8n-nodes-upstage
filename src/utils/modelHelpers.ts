@@ -91,4 +91,3 @@ export function compareModelNames(a: string, b: string): number {
 
 	return b.localeCompare(a);
 }
-
