@@ -34,6 +34,10 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# Test files in dist (safety measure)
+dist/**/__tests__/**
+dist/**/*.test.*
+
 # Misc
 *.log
 .env
