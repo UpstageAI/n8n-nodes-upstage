@@ -427,5 +427,181 @@ describe('LmChatUpstage', () => {
 				);
 			});
 		});
+
+		describe('Response Format', () => {
+			it('should not include response_format when set to default', async () => {
+				const mockResponse = {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: 'Test response',
+							},
+						},
+					],
+				};
+
+				(mockExecuteFunctions.getInputData as jest.Mock).mockReturnValue([
+					{ json: {} },
+				]);
+				(mockExecuteFunctions.getNodeParameter as jest.Mock).mockImplementation(
+					(param: string) => {
+						if (param === 'model') return 'solar-mini';
+						if (param === 'messages.message')
+							return [{ role: 'user', content: 'Hello' }];
+						if (param === 'response_format') return 'default';
+						if (param === 'json_schema') return '{}';
+						if (param === 'options') return {};
+						return undefined;
+					}
+				);
+				(mockExecuteFunctions.getCredentials as jest.Mock).mockResolvedValue({
+					apiKey: 'test-key',
+				});
+				mockHttpRequest.mockResolvedValue(mockResponse);
+
+				await node.execute.call(mockExecuteFunctions);
+
+				expect(mockHttpRequest).toHaveBeenCalled();
+				const callArgs = mockHttpRequest.mock.calls[0];
+				const requestBody = callArgs[2].body;
+
+				expect(requestBody.response_format).toBeUndefined();
+			});
+
+			it('should include response_format as json_object when set', async () => {
+				const mockResponse = {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: 'Test response',
+							},
+						},
+					],
+				};
+
+				(mockExecuteFunctions.getInputData as jest.Mock).mockReturnValue([
+					{ json: {} },
+				]);
+				(mockExecuteFunctions.getNodeParameter as jest.Mock).mockImplementation(
+					(param: string) => {
+						if (param === 'model') return 'solar-pro2';
+						if (param === 'messages.message')
+							return [{ role: 'user', content: 'Hello' }];
+						if (param === 'response_format') return 'json_object';
+						if (param === 'json_schema') return '{}';
+						if (param === 'options') return {};
+						return undefined;
+					}
+				);
+				(mockExecuteFunctions.getCredentials as jest.Mock).mockResolvedValue({
+					apiKey: 'test-key',
+				});
+				mockHttpRequest.mockResolvedValue(mockResponse);
+
+				await node.execute.call(mockExecuteFunctions);
+
+				expect(mockHttpRequest).toHaveBeenCalled();
+				const callArgs = mockHttpRequest.mock.calls[0];
+				const requestBody = callArgs[2].body;
+
+				expect(requestBody.response_format).toEqual({ type: 'json_object' });
+			});
+
+			it('should include response_format as json_schema when set with valid schema', async () => {
+				const validSchema = {
+					type: 'object',
+					properties: {
+						name: { type: 'string' },
+						age: { type: 'number' },
+					},
+					required: ['name'],
+				};
+
+				const mockResponse = {
+					choices: [
+						{
+							message: {
+								role: 'assistant',
+								content: 'Test response',
+							},
+						},
+					],
+				};
+
+				(mockExecuteFunctions.getInputData as jest.Mock).mockReturnValue([
+					{ json: {} },
+				]);
+				(mockExecuteFunctions.getNodeParameter as jest.Mock).mockImplementation(
+					(param: string) => {
+						if (param === 'model') return 'solar-pro2';
+						if (param === 'messages.message')
+							return [{ role: 'user', content: 'Hello' }];
+						if (param === 'response_format') return 'json_schema';
+						if (param === 'json_schema') return JSON.stringify(validSchema);
+						if (param === 'options') return {};
+						return undefined;
+					}
+				);
+				(mockExecuteFunctions.getCredentials as jest.Mock).mockResolvedValue({
+					apiKey: 'test-key',
+				});
+				mockHttpRequest.mockResolvedValue(mockResponse);
+
+				await node.execute.call(mockExecuteFunctions);
+
+				expect(mockHttpRequest).toHaveBeenCalled();
+				const callArgs = mockHttpRequest.mock.calls[0];
+				const requestBody = callArgs[2].body;
+
+				expect(requestBody.response_format).toEqual({
+					type: 'json_schema',
+					json_schema: validSchema,
+				});
+			});
+
+			it('should throw error when json_schema is missing for json_schema format', async () => {
+				(mockExecuteFunctions.getInputData as jest.Mock).mockReturnValue([
+					{ json: {} },
+				]);
+				(mockExecuteFunctions.getNodeParameter as jest.Mock).mockImplementation(
+					(param: string) => {
+						if (param === 'model') return 'solar-pro2';
+						if (param === 'messages.message')
+							return [{ role: 'user', content: 'Hello' }];
+						if (param === 'response_format') return 'json_schema';
+						if (param === 'json_schema') return '{}'; // Empty schema should trigger error
+						if (param === 'options') return {};
+						return undefined;
+					}
+				);
+
+				await expect(node.execute.call(mockExecuteFunctions)).rejects.toThrow(
+					'JSON Schema is required'
+				);
+			});
+
+			it('should throw error when json_schema is invalid JSON', async () => {
+				(mockExecuteFunctions.getInputData as jest.Mock).mockReturnValue([
+					{ json: {} },
+				]);
+				(mockExecuteFunctions.getNodeParameter as jest.Mock).mockImplementation(
+					(param: string) => {
+						if (param === 'model') return 'solar-pro2';
+						if (param === 'messages.message')
+							return [{ role: 'user', content: 'Hello' }];
+						if (param === 'response_format') return 'json_schema';
+						if (param === 'json_schema') return 'invalid json string{';
+						if (param === 'options') return {};
+						return undefined;
+					}
+				);
+
+				await expect(node.execute.call(mockExecuteFunctions)).rejects.toThrow(
+					'Invalid JSON schema provided'
+				);
+			});
+		});
 	});
 });

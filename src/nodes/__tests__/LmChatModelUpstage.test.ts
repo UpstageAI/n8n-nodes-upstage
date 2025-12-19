@@ -199,15 +199,15 @@ describe('LmChatModelUpstage', () => {
 		});
 
 		describe('Response Format', () => {
-			it('should not set responseFormat when response_format is not provided', async () => {
+			it('should not set responseFormat when response_format is default', async () => {
 				(
 					mockSupplyDataFunctions.getNodeParameter as jest.Mock
 				).mockImplementation(
 					(param: string, _i: number, defaultValue?: unknown) => {
 						if (param === 'model') return 'solar-mini';
-						if (param === 'options') {
-							return {};
-						}
+						if (param === 'response_format') return 'default';
+						if (param === 'json_schema') return '{}';
+						if (param === 'options') return {};
 						return defaultValue;
 					}
 				);
@@ -225,21 +225,15 @@ describe('LmChatModelUpstage', () => {
 				expect(lastConfig.responseFormat).toBeUndefined();
 			});
 
-			it('should set responseFormat to json_object when response_format format is json_object', async () => {
+			it('should set responseFormat to json_object when response_format is json_object', async () => {
 				(
 					mockSupplyDataFunctions.getNodeParameter as jest.Mock
 				).mockImplementation(
 					(param: string, _i: number, defaultValue?: unknown) => {
 						if (param === 'model') return 'solar-pro2';
-						if (param === 'options') {
-							return {
-								response_format: {
-									values: {
-										format: 'json_object',
-									},
-								},
-							};
-						}
+						if (param === 'response_format') return 'json_object';
+						if (param === 'json_schema') return '{}';
+						if (param === 'options') return {};
 						return defaultValue;
 					}
 				);
@@ -258,7 +252,7 @@ describe('LmChatModelUpstage', () => {
 				expect(lastConfig.responseFormat).toEqual({ type: 'json_object' });
 			});
 
-			it('should set responseFormat to json_schema when response_format format is json_schema with valid schema', async () => {
+			it('should set responseFormat to json_schema when response_format is json_schema with valid schema', async () => {
 				const validSchema = {
 					type: 'object',
 					properties: {
@@ -273,16 +267,9 @@ describe('LmChatModelUpstage', () => {
 				).mockImplementation(
 					(param: string, _i: number, defaultValue?: unknown) => {
 						if (param === 'model') return 'solar-pro2';
-						if (param === 'options') {
-							return {
-								response_format: {
-									values: {
-										format: 'json_schema',
-										json_schema: JSON.stringify(validSchema),
-									},
-								},
-							};
-						}
+						if (param === 'response_format') return 'json_schema';
+						if (param === 'json_schema') return JSON.stringify(validSchema);
+						if (param === 'options') return {};
 						return defaultValue;
 					}
 				);
@@ -310,16 +297,9 @@ describe('LmChatModelUpstage', () => {
 				).mockImplementation(
 					(param: string, _i: number, defaultValue?: unknown) => {
 						if (param === 'model') return 'solar-pro2';
-						if (param === 'options') {
-							return {
-								response_format: {
-									values: {
-										format: 'json_schema',
-										json_schema: 'invalid json string{',
-									},
-								},
-							};
-						}
+						if (param === 'response_format') return 'json_schema';
+						if (param === 'json_schema') return 'invalid json string{';
+						if (param === 'options') return {};
 						return defaultValue;
 					}
 				);
@@ -340,16 +320,9 @@ describe('LmChatModelUpstage', () => {
 				).mockImplementation(
 					(param: string, _i: number, defaultValue?: unknown) => {
 						if (param === 'model') return 'solar-pro2';
-						if (param === 'options') {
-							return {
-								response_format: {
-									values: {
-										format: 'json_schema',
-										// json_schema is missing
-									},
-								},
-							};
-						}
+						if (param === 'response_format') return 'json_schema';
+						if (param === 'json_schema') return '{}'; // Empty schema should trigger error
+						if (param === 'options') return {};
 						return defaultValue;
 					}
 				);
@@ -361,7 +334,7 @@ describe('LmChatModelUpstage', () => {
 
 				await expect(
 					node.supplyData.call(mockSupplyDataFunctions, 0)
-				).rejects.toThrow('JSON Schema is required when response_format format is set to json_schema');
+				).rejects.toThrow('JSON Schema is required');
 			});
 
 			it('should combine responseFormat with other options', async () => {
@@ -370,16 +343,13 @@ describe('LmChatModelUpstage', () => {
 				).mockImplementation(
 					(param: string, _i: number, defaultValue?: unknown) => {
 						if (param === 'model') return 'solar-pro2';
+						if (param === 'response_format') return 'json_object';
+						if (param === 'json_schema') return '{}';
 						if (param === 'options') {
 							return {
 								temperature: 0.8,
 								maxTokens: 2000,
 								streaming: true,
-								response_format: {
-									values: {
-										format: 'json_object',
-									},
-								},
 							};
 						}
 						return defaultValue;
@@ -408,16 +378,9 @@ describe('LmChatModelUpstage', () => {
 				).mockImplementation(
 					(param: string, _i: number, defaultValue?: unknown) => {
 						if (param === 'model') return 'solar-pro2';
-						if (param === 'options') {
-							return {
-								response_format: {
-									values: {
-										format: 'json_object',
-										json_schema: '{"type":"object"}', // This should be ignored
-									},
-								},
-							};
-						}
+						if (param === 'response_format') return 'json_object';
+						if (param === 'json_schema') return '{"type":"object"}'; // This should be ignored
+						if (param === 'options') return {};
 						return defaultValue;
 					}
 				);
