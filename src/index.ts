@@ -9,6 +9,6 @@ export { DocumentOCRUpstage } from './nodes/DocumentOCRUpstage.node';
 export { InformationExtractionUpstage } from './nodes/InformationExtractionUpstage.node';
 export { DocumentClassificationUpstage } from './nodes/DocumentClassificationUpstage.node';
 
-// Export LangChain compatible nodes
+// Export AI Agent compatible nodes (no external dependencies)
 export { LmChatModelUpstage } from './nodes/LmChatModelUpstage.node';
 export { EmbeddingsUpstageModel } from './nodes/EmbeddingsUpstageModel.node';

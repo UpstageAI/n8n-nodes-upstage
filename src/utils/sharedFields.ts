@@ -65,7 +65,7 @@ function formatConnectionType(type: NodeConnectionType): string {
  * Get the connection hint field for a node
  *
  * Creates a notice field that displays which node types can be connected
- * to this node. Used primarily in LangChain-compatible nodes.
+ * to this node. Used primarily in AI Agent-compatible nodes.
  *
  * @param allowedConnectionTypes - Array of NodeConnectionType values that this node accepts
  * @returns INodeProperties object representing a notice field

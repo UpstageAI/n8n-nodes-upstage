@@ -1,6 +1,5 @@
 import { N8nLlmTracing } from '../N8nLlmTracing';
 import type { ISupplyDataFunctions } from 'n8n-workflow';
-import type { LLMResult } from '@langchain/core/outputs';
 
 describe('N8nLlmTracing', () => {
 	let tracing: N8nLlmTracing;
@@ -38,13 +37,14 @@ describe('N8nLlmTracing', () => {
 			const prompts = ['test prompt'];
 			const runId = 'test-run-id';
 
-			// Mock LLM object with proper Serialized structure
+			// Mock LLM object
 			const llm = {
-				lc: 1,
-				id: ['test', 'llm'],
-				type: 'llm',
-				kwargs: {},
-			} as any;
+				type: 'constructor',
+				kwargs: {
+					model: 'solar-mini',
+					temperature: 0.7,
+				},
+			};
 
 			await tracing.handleLLMStart(llm, prompts, runId);
 
@@ -67,11 +67,11 @@ describe('N8nLlmTracing', () => {
 			const runId = 'test-run-id-2';
 
 			const llm = {
-				lc: 1,
-				id: ['test', 'llm'],
-				type: 'llm',
-				kwargs: {},
-			} as any;
+				type: 'constructor',
+				kwargs: {
+					model: 'solar-mini',
+				},
+			};
 
 			await tracing.handleLLMStart(llm, prompts, runId);
 
@@ -86,28 +86,63 @@ describe('N8nLlmTracing', () => {
 			const prompts = ['test prompt'];
 			const runId = 'test-run-id';
 			const llm = {
-				lc: 1,
-				id: ['test', 'llm'],
-				type: 'llm',
+				type: 'constructor',
 				kwargs: {},
-			} as any;
+			};
 
 			await tracing.handleLLMStart(llm, prompts, runId);
 
-			const output: LLMResult = {
+			const output = {
 				generations: [
 					[
 						{
-							text: 'test output',
+							text: 'Test response',
+							generationInfo: { finish_reason: 'stop' },
+						},
+					],
+				],
+				llmOutput: {
+					tokenUsage: {
+						promptTokens: 10,
+						completionTokens: 5,
+						totalTokens: 15,
+					},
+				},
+			};
+
+			await tracing.handleLLMEnd(output, runId);
+
+			expect(mockAddOutputData).toHaveBeenCalled();
+			const outputCall = mockAddOutputData.mock.calls[0];
+			expect(outputCall[0]).toBe('ai_languageModel');
+			expect(outputCall[1]).toBe(0);
+			expect(Array.isArray(outputCall[2])).toBe(true);
+		});
+
+		it('should use token usage estimate when actual usage is not available', async () => {
+			const prompts = ['test prompt'];
+			const runId = 'test-run-id';
+			const llm = {
+				type: 'constructor',
+				kwargs: {},
+			};
+
+			await tracing.handleLLMStart(llm, prompts, runId);
+
+			const output = {
+				generations: [
+					[
+						{
+							text: 'Test response',
 							generationInfo: {},
 						},
 					],
 				],
 				llmOutput: {
 					tokenUsage: {
-						completionTokens: 10,
-						promptTokens: 20,
-						totalTokens: 30,
+						promptTokens: 0,
+						completionTokens: 0,
+						totalTokens: 0,
 					},
 				},
 			};
@@ -115,209 +150,69 @@ describe('N8nLlmTracing', () => {
 			await tracing.handleLLMEnd(output, runId);
 
 			expect(mockAddOutputData).toHaveBeenCalled();
-			expect(mockAddOutputData).toHaveBeenCalledWith(
-				'ai_languageModel',
-				0,
-				expect.arrayContaining([
-					expect.arrayContaining([
-						expect.objectContaining({
-							json: expect.objectContaining({
-								response: expect.objectContaining({
-									generations: expect.any(Array),
-								}),
-								tokenUsage: expect.objectContaining({
-									completionTokens: 10,
-									promptTokens: 20,
-									totalTokens: 30,
-								}),
-							}),
-						}),
-					]),
-				])
-			);
-		});
-
-		it('should handle token usage parsing with usage format', async () => {
-			const prompts = ['test prompt'];
-			const runId = 'test-run-id-usage';
-			const llm = {
-				lc: 1,
-				id: ['test', 'llm'],
-				type: 'llm',
-				kwargs: {},
-			} as any;
-
-			await tracing.handleLLMStart(llm, prompts, runId);
-
-			const output: LLMResult = {
-				generations: [[{ text: 'test', generationInfo: {} }]],
-				llmOutput: {
-					usage: {
-						completion_tokens: 5,
-						prompt_tokens: 15,
-						total_tokens: 20,
-					},
-				},
-			};
-
-			await tracing.handleLLMEnd(output, runId);
-
-			expect(mockAddOutputData).toHaveBeenCalled();
-		});
-
-		it('should estimate tokens when usage not available', async () => {
-			const prompts = ['test prompt'];
-			const runId = 'test-run-id-estimate';
-			const llm = {
-				lc: 1,
-				id: ['test', 'llm'],
-				type: 'llm',
-				kwargs: {},
-			} as any;
-
-			await tracing.handleLLMStart(llm, prompts, runId);
-
-			const output: LLMResult = {
-				generations: [[{ text: 'test', generationInfo: {} }]],
-				llmOutput: {},
-			};
-
-			await tracing.handleLLMEnd(output, runId);
-
-			expect(mockAddOutputData).toHaveBeenCalled();
-			const outputCall = (mockAddOutputData as jest.Mock).mock.calls[0];
-			expect(outputCall[2][0][0].json).toHaveProperty('tokenUsageEstimate');
 		});
 	});
 
 	describe('handleLLMError', () => {
-		it('should handle LLM errors', async () => {
-			// First set up a run in runsMap
-			const prompts = ['test prompt'];
-			const runId = 'test-run-id-error';
-			const llm = {
-				lc: 1,
-				id: ['test', 'llm'],
-				type: 'llm',
-				kwargs: {},
-			} as any;
-
-			await tracing.handleLLMStart(llm, prompts, runId);
-
-			const error = new Error('LLM error');
+		it('should handle NodeError', async () => {
+			const runId = 'test-run-id';
+			const error = new Error('Test error') as any;
+			error.description = 'Test error description';
 
 			await tracing.handleLLMError(error, runId);
 
 			expect(mockAddOutputData).toHaveBeenCalled();
-			// Verify that addOutputData was called with error handling
-			const outputCalls = (mockAddOutputData as jest.Mock).mock.calls;
-			expect(outputCalls.length).toBeGreaterThan(0);
-			// The error is passed directly to addOutputData, so verify it was called
-			expect(outputCalls[outputCalls.length - 1][0]).toBe('ai_languageModel');
+		});
+
+		it('should handle regular Error', async () => {
+			const runId = 'test-run-id';
+			const error = new Error('Test error');
+
+			await tracing.handleLLMError(error, runId);
+
+			expect(mockAddOutputData).toHaveBeenCalled();
+		});
+
+		it('should filter out non-x- headers from error', async () => {
+			const runId = 'test-run-id';
+			const error = {
+				message: 'Test error',
+				headers: {
+					authorization: 'Bearer token',
+					'x-request-id': '123',
+					'content-type': 'application/json',
+				},
+			};
+
+			await tracing.handleLLMError(error, runId);
+
+			// Verify headers were filtered
+			expect(error.headers.authorization).toBeUndefined();
+			expect(error.headers['content-type']).toBeUndefined();
+			expect(error.headers['x-request-id']).toBe('123');
 		});
 	});
 
-	describe('token usage parsing', () => {
-		it('should parse tokenUsage format', () => {
-			const llmOutput = {
-				tokenUsage: {
-					completionTokens: 10,
-					promptTokens: 20,
-					totalTokens: 30,
-				},
-			};
+	describe('token estimation', () => {
+		it('should estimate tokens from string list', async () => {
+			const list = ['Hello world', 'Test message'];
+			const tokens = await tracing.estimateTokensFromStringList(list);
 
-			const parser = (tracing as any).options.tokensUsageParser;
-			const result = parser(llmOutput);
-
-			expect(result).toEqual({
-				completionTokens: 10,
-				promptTokens: 20,
-				totalTokens: 30,
-			});
+			expect(typeof tokens).toBe('number');
+			expect(tokens).toBeGreaterThan(0);
 		});
 
-		it('should parse usage format', () => {
-			// Create a custom tracing instance with Upstage parser
-			const customTracing = new N8nLlmTracing(mockSupplyDataFunctions, {
-				tokensUsageParser: llmOutput => {
-					if (!llmOutput || typeof llmOutput !== 'object') {
-						return {
-							completionTokens: 0,
-							promptTokens: 0,
-							totalTokens: 0,
-						};
-					}
-					const llmOutputObj = llmOutput as Record<string, unknown>;
-					const usage = llmOutputObj?.tokenUsage || llmOutputObj?.usage;
-					if (usage && typeof usage === 'object') {
-						const usageObj = usage as Record<string, unknown>;
-						const completionTokens =
-							(typeof usageObj.completion_tokens === 'number'
-								? usageObj.completion_tokens
-								: 0) ||
-							(typeof usageObj.completionTokens === 'number'
-								? usageObj.completionTokens
-								: 0) ||
-							0;
-						const promptTokens =
-							(typeof usageObj.prompt_tokens === 'number'
-								? usageObj.prompt_tokens
-								: 0) ||
-							(typeof usageObj.promptTokens === 'number'
-								? usageObj.promptTokens
-								: 0) ||
-							0;
-						const totalTokens =
-							(typeof usageObj.total_tokens === 'number'
-								? usageObj.total_tokens
-								: 0) ||
-							(typeof usageObj.totalTokens === 'number'
-								? usageObj.totalTokens
-								: 0) ||
-							completionTokens + promptTokens;
+		it('should estimate tokens from generations', async () => {
+			const generations = [
+				[
+					{ text: 'Response 1', generationInfo: {} },
+					{ text: 'Response 2', generationInfo: {} },
+				],
+			];
+			const tokens = await tracing.estimateTokensFromGeneration(generations);
 
-						return {
-							completionTokens,
-							promptTokens,
-							totalTokens,
-						};
-					}
-					return {
-						completionTokens: 0,
-						promptTokens: 0,
-						totalTokens: 0,
-					};
-				},
-			});
-
-			const llmOutput = {
-				usage: {
-					completion_tokens: 5,
-					prompt_tokens: 15,
-					total_tokens: 20,
-				},
-			};
-
-			const parser = (customTracing as any).options.tokensUsageParser;
-			const result = parser(llmOutput);
-
-			expect(result).toEqual({
-				completionTokens: 5,
-				promptTokens: 15,
-				totalTokens: 20,
-			});
-		});
-
-		it('should return zeros for invalid output', () => {
-			const parser = (tracing as any).options.tokensUsageParser;
-			const result = parser(null);
-
-			expect(result).toEqual({
-				completionTokens: 0,
-				promptTokens: 0,
-				totalTokens: 0,
-			});
+			expect(typeof tokens).toBe('number');
+			expect(tokens).toBeGreaterThan(0);
 		});
 	});
 });

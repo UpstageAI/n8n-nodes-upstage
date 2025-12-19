@@ -10,7 +10,7 @@ Upstage Solar LLM and Embeddings nodes for n8n workflow automation. This package
 - **Solar Chat Models**: Use Upstage's Solar LLM (solar-mini, solar-pro, solar-pro2) for chat completions
 - **Embeddings Generation**: Create high-quality embeddings for semantic search and vector databases
 - **Document Processing**: Parse, OCR, classify, and extract information from documents
-- **LangChain Integration**: Compatible nodes for advanced AI agent workflows
+- **AI Agent Integration**: Compatible nodes for n8n AI Agent and Vector Store workflows (no external dependencies)
 - **Secure Authentication**: Simple API key-based authentication
 - **Batch Processing**: Efficient batch processing for embeddings and document operations
 - **Flexible Input**: Support for single text, batch processing, binary files, and URLs
@@ -215,23 +215,23 @@ Classify documents into predefined categories with confidence scores.
 - Content categorization
 - Quality control
 
-### LangChain-Compatible Nodes (AI Agent Workflows)
+### AI Agent Nodes (n8n AI Workflows)
 
 #### Upstage Solar Chat for Agent (`LmChatModelUpstage`)
 
-LangChain-compatible chat model for use with n8n AI Chain and AI Agent nodes.
+Language model for use with n8n AI Chain and AI Agent nodes. Implements the n8n Language Model interface without external dependencies.
 
 **Key Features:**
 - Automatic model selection from API
 - Token usage tracking
-- Streaming support
+- Streaming support (basic)
 - Response format options (solar-pro2 only):
   - Text (default)
   - JSON Object - Generate structured JSON responses
   - JSON Schema - Generate JSON with custom schema for structured outputs
-- Function calling support (tools) - Bind tools to the model using LangChain bindTools
+- Function calling support (tools) - Bind tools to the model
 - N8n tracing integration
-- Proxy support
+- Direct HTTP API calls (no external dependencies)
 
 **Connections:**
 - Connects to: `AI Chain`, `AI Agent` nodes
@@ -245,13 +245,14 @@ LangChain-compatible chat model for use with n8n AI Chain and AI Agent nodes.
 
 #### Upstage Embed for Agent (`EmbeddingsUpstageModel`)
 
-LangChain-compatible embeddings model for vector databases and AI agent workflows.
+Embeddings model for vector databases and AI agent workflows. Implements the n8n Embeddings interface without external dependencies.
 
 **Key Features:**
-- LangChain Embeddings interface
+- Embeddings interface compatible with n8n AI Vector Store
 - Batch processing support
 - Vector database integration
 - Automatic text preprocessing
+- Direct HTTP API calls (no external dependencies)
 
 **Connections:**
 - Connects to: `AI Vector Store` nodes
@@ -291,7 +292,7 @@ Use the **Upstage Embed** node with "Array of Texts" input type to process multi
 2. **Upstage Document Parse** node → Parse to Markdown
 3. Process the structured output
 
-### AI Agent with LangChain
+### AI Agent Workflow
 
 1. **Upstage Solar Chat for Agent** → Configure model
 2. **AI Agent** node → Connect to chat model
@@ -452,7 +453,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 - Built with [n8n](https://n8n.io/) workflow automation platform
 - Powered by [Upstage Solar](https://upstage.ai/) AI models
-- Uses [LangChain](https://js.langchain.com/) for AI agent integration
+- Implements n8n AI Agent interfaces without external dependencies
 
 ---
 

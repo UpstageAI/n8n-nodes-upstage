@@ -1,4 +1,3 @@
-import type { FailedAttemptHandler } from '@langchain/core/dist/utils/async_caller';
 import type { ISupplyDataFunctions, JsonObject } from 'n8n-workflow';
 import { NodeApiError } from 'n8n-workflow';
 
@@ -11,7 +10,14 @@ interface RetryableError extends Error {
 import { n8nDefaultFailedAttemptHandler } from './n8nDefaultFailedAttemptHandler';
 
 /**
- * This function returns a custom failed attempt handler for using with LangChain models.
+ * Handler function type for failed attempts (retry logic)
+ */
+export type FailedAttemptHandler = (
+	error: RetryableError
+) => void | Promise<void>;
+
+/**
+ * This function returns a custom failed attempt handler for using with language models.
  * It first tries to use a custom handler passed as an argument, and if that doesn't throw an error, it uses the default handler.
  * It always wraps the error in a NodeApiError.
  * It throws an error ONLY if there are no retries left.

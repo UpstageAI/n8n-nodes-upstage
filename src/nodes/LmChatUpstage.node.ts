@@ -158,7 +158,8 @@ export class LmChatUpstage implements INodeType {
 					{
 						name: 'Text (Default)',
 						value: 'default',
-						description: 'This configuration does not utilise the response format parameter. The response is provided in the standard format.',
+						description:
+							'This configuration does not utilise the response format parameter. The response is provided in the standard format.',
 					},
 					{
 						name: 'JSON Object',
@@ -174,7 +175,8 @@ export class LmChatUpstage implements INodeType {
 					},
 				],
 				default: 'default',
-				description: 'Format for model output. JSON formats only work with solar-pro-2 model.',
+				description:
+					'Format for model output. JSON formats only work with solar-pro-2 model.',
 			},
 			{
 				displayName: 'JSON Schema',
@@ -417,8 +419,16 @@ export class LmChatUpstage implements INodeType {
 					role: string;
 					content: string;
 				}>;
-				const responseFormat = this.getNodeParameter('response_format', i, 'default') as string;
-				const jsonSchema = this.getNodeParameter('json_schema', i, '{}') as string;
+				const responseFormat = this.getNodeParameter(
+					'response_format',
+					i,
+					'default'
+				) as string;
+				const jsonSchema = this.getNodeParameter(
+					'json_schema',
+					i,
+					'{}'
+				) as string;
 
 				const options = this.getNodeParameter('options', i, {}) as {
 					temperature?: number;
