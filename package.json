@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "build": "tsc && npm run copy-assets",
-    "copy-assets": "cp src/upstage_v2.svg dist/",
+    "copy-assets": "cp upstage_v2.svg dist/",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build && npm run test",
@@ -24,8 +24,8 @@
     "test:coverage": "jest --coverage",
     "lint": "eslint . --ext .js,.ts",
     "lintfix": "eslint . --ext .js,.ts --fix",
-    "format": "prettier --write src/**/*.{ts,js,json}",
-    "format:check": "prettier --check src/**/*.{ts,js,json}",
+    "format": "prettier --write credentials/**/*.{ts,js} nodes/**/*.{ts,js} utils/**/*.{ts,js} index.ts",
+    "format:check": "prettier --check credentials/**/*.{ts,js} nodes/**/*.{ts,js} utils/**/*.{ts,js} index.ts",
     "setup:n8n": "npm run build && npm link && cd $(npm root -g)/n8n && npm link n8n-nodes-upstage --legacy-peer-deps"
   },
   "keywords": [

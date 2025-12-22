@@ -4,12 +4,12 @@ import type {
 	INodeTypeDescription,
 	IHttpRequestOptions,
 } from 'n8n-workflow';
-import { N8nLlmTracing } from '../../utils/N8nLlmTracing';
-import { makeN8nLlmFailedAttemptHandler } from '../../utils/n8nLlmFailedAttemptHandler';
+import { N8nLlmTracing } from '../utils/N8nLlmTracing';
+import { makeN8nLlmFailedAttemptHandler } from '../utils/n8nLlmFailedAttemptHandler';
 
 // Mock dependencies
-jest.mock('../../utils/N8nLlmTracing');
-jest.mock('../../utils/n8nLlmFailedAttemptHandler');
+jest.mock('../utils/N8nLlmTracing');
+jest.mock('../utils/n8nLlmFailedAttemptHandler');
 
 describe('LmChatModelUpstage', () => {
 	let node: LmChatModelUpstage;
