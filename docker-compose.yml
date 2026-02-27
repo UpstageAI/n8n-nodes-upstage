@@ -76,6 +76,8 @@ services:
       # Local development volumes (only used when NODE_MODE=dev)
       - ./dist:/tmp/n8n-nodes-upstage/dist:ro
       - ./package.json:/tmp/n8n-nodes-upstage/package.json:ro
+      # Pre-built node_modules for dev mode (avoids npm install issues with peer deps)
+      - ./node_modules:/tmp/n8n-nodes-upstage/node_modules:ro
     environment:
       - N8N_COMMUNITY_NODES_ENABLED=true
       - N8N_CUSTOM_EXTENSIONS=/home/node/.n8n/custom
@@ -114,10 +116,12 @@ services:
             echo '[upstage] Installing/Updating local n8n-nodes-upstage...'
             mkdir -p /home/node/.n8n/custom
             rm -rf /home/node/.n8n/custom/*
-            cp -r /tmp/n8n-nodes-upstage/* /home/node/.n8n/custom/
-            cd /home/node/.n8n/custom
-            npm install --production --legacy-peer-deps
-            echo '[upstage] Local n8n-nodes-upstage installed/updated successfully!'
+            # Copy dist and package.json
+            cp -r /tmp/n8n-nodes-upstage/dist /home/node/.n8n/custom/
+            cp /tmp/n8n-nodes-upstage/package.json /home/node/.n8n/custom/
+            # Symlink pre-built node_modules from host (avoids npm install peer dep issues)
+            ln -s /tmp/n8n-nodes-upstage/node_modules /home/node/.n8n/custom/node_modules
+            echo '[upstage] Local n8n-nodes-upstage installed successfully!'
           else
             echo '[upstage] Local n8n-nodes-upstage is up to date, skipping reinstall.'
           fi
