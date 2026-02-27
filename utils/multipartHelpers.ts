@@ -1,6 +1,14 @@
 import { randomBytes } from 'crypto';
 
 /**
+ * Sanitize a string for use in multipart headers to prevent CRLF/header injection.
+ * Removes CR, LF, and double-quote characters.
+ */
+function sanitizeHeaderValue(value: string): string {
+	return value.replace(/[\r\n"]/g, '');
+}
+
+/**
  * Creates multipart/form-data body without external dependencies.
  * Uses crypto.randomBytes for secure boundary generation.
  */
@@ -14,21 +22,24 @@ export function createMultipartFormData(
 
 	// Add text fields
 	for (const [name, value] of Object.entries(fields)) {
+		const safeName = sanitizeHeaderValue(name);
 		parts.push(
 			Buffer.from(
 				`--${boundary}\r\n` +
-					`Content-Disposition: form-data; name="${name}"\r\n\r\n` +
+					`Content-Disposition: form-data; name="${safeName}"\r\n\r\n` +
 					`${value}\r\n`
 			)
 		);
 	}
 
 	// Add file
+	const safeFilename = sanitizeHeaderValue(file.filename);
+	const safeContentType = sanitizeHeaderValue(file.contentType);
 	parts.push(
 		Buffer.from(
 			`--${boundary}\r\n` +
-				`Content-Disposition: form-data; name="document"; filename="${file.filename}"\r\n` +
-				`Content-Type: ${file.contentType}\r\n\r\n`
+				`Content-Disposition: form-data; name="document"; filename="${safeFilename}"\r\n` +
+				`Content-Type: ${safeContentType}\r\n\r\n`
 		)
 	);
 	parts.push(file.buffer);

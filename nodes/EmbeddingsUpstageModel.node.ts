@@ -253,6 +253,16 @@ class UpstageEmbeddings implements EmbeddingsInterface {
 	 * Embed documents (batch processing)
 	 */
 	async embedDocuments(texts: string[]): Promise<number[][]> {
+		// Validate all inputs are strings before preprocessing
+		for (let i = 0; i < texts.length; i++) {
+			if (!texts[i] || typeof texts[i] !== 'string') {
+				throw new NodeOperationError(
+					this.node,
+					`Invalid input at index ${i}: expected a non-empty string, got ${typeof texts[i]}`
+				);
+			}
+		}
+
 		// Preprocess texts (strip newlines if enabled)
 		const processedTexts = this.stripNewLines
 			? texts.map(text => text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim())
@@ -273,6 +283,13 @@ class UpstageEmbeddings implements EmbeddingsInterface {
 	 * Embed a single query
 	 */
 	async embedQuery(text: string): Promise<number[]> {
+		if (!text || typeof text !== 'string') {
+			throw new NodeOperationError(
+				this.node,
+				`Invalid input: expected a non-empty string, got ${typeof text}`
+			);
+		}
+
 		// Preprocess text
 		const processedText = this.stripNewLines
 			? text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim()
@@ -283,15 +300,20 @@ class UpstageEmbeddings implements EmbeddingsInterface {
 	}
 
 	private async callUpstageAPI(input: string[]): Promise<number[][]> {
-		// Validate and clean input
-		const cleanInput = input
-			.filter(
-				text => text && typeof text === 'string' && text.trim().length > 0
-			)
-			.map(text => text.trim());
+		// Validate input - reject invalid/empty strings to maintain 1:1 alignment
+		for (let i = 0; i < input.length; i++) {
+			if (!input[i] || typeof input[i] !== 'string' || input[i].trim().length === 0) {
+				throw new NodeOperationError(
+					this.node,
+					`Invalid or empty input at index ${i}. All inputs must be non-empty strings.`
+				);
+			}
+		}
+
+		const cleanInput = input.map(text => text.trim());
 
 		if (cleanInput.length === 0) {
-			throw new NodeOperationError(this.node, 'No valid input texts provided for embedding');
+			throw new NodeOperationError(this.node, 'No input texts provided for embedding');
 		}
 
 		// Check batch size (Upstage limit: 100 strings)
