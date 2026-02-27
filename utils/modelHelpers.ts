@@ -45,8 +45,9 @@ export function extractVersionInfo(name: string): VersionInfo {
  * Gets tier priority for model sorting
  */
 export function getTierPriority(name: string): number {
-	if (name.includes('pro2')) return 4;
-	if (name.includes('pro') && !name.includes('pro2')) return 3;
+	if (name.includes('pro3')) return 5;
+	if (name.includes('pro2') && !name.includes('pro3')) return 4;
+	if (name.includes('pro') && !name.includes('pro2') && !name.includes('pro3')) return 3;
 	if (name.includes('solar-1')) return 2;
 	if (name.includes('mini')) return 1;
 	return 0;
