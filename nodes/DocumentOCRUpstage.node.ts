@@ -6,6 +6,7 @@ import type {
 	IHttpRequestOptions,
 	JsonObject,
 } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
 import { handleNodeError } from '../utils/errorHandling';
 import {
 	validateFileSize,
@@ -15,46 +16,7 @@ import {
 	isDocumentOCRResponse,
 	type DocumentOCRResponse,
 } from '../utils/typeGuards';
-
-// Helper function to create multipart/form-data without external dependencies
-function createMultipartFormData(
-	fields: Record<string, string>,
-	file: { buffer: Buffer; filename: string; contentType: string }
-): { body: Buffer; contentType: string } {
-	const boundary =
-		'----WebKitFormBoundary' + Math.random().toString(36).substring(2);
-	const parts: Buffer[] = [];
-
-	// Add text fields
-	for (const [name, value] of Object.entries(fields)) {
-		parts.push(
-			Buffer.from(
-				`--${boundary}\r\n` +
-					`Content-Disposition: form-data; name="${name}"\r\n\r\n` +
-					`${value}\r\n`
-			)
-		);
-	}
-
-	// Add file
-	parts.push(
-		Buffer.from(
-			`--${boundary}\r\n` +
-				`Content-Disposition: form-data; name="document"; filename="${file.filename}"\r\n` +
-				`Content-Type: ${file.contentType}\r\n\r\n`
-		)
-	);
-	parts.push(file.buffer);
-	parts.push(Buffer.from('\r\n'));
-
-	// End boundary
-	parts.push(Buffer.from(`--${boundary}--\r\n`));
-
-	return {
-		body: Buffer.concat(parts),
-		contentType: `multipart/form-data; boundary=${boundary}`,
-	};
-}
+import { createMultipartFormData } from '../utils/multipartHelpers';
 
 export class DocumentOCRUpstage implements INodeType {
 	description: INodeTypeDescription = {
@@ -138,7 +100,8 @@ export class DocumentOCRUpstage implements INodeType {
 
 				const item = items[i];
 				if (!item.binary || !item.binary[binaryPropertyName]) {
-					throw new Error(
+					throw new NodeOperationError(
+						this.getNode(),
 						`No binary data found in property "${binaryPropertyName}".`
 					);
 				}
@@ -146,7 +109,7 @@ export class DocumentOCRUpstage implements INodeType {
 				const binaryData = item.binary[binaryPropertyName];
 
 				// Validate file size (50MB limit) - check metadata first if available
-				validateFileSizeFromMetadata(binaryData.fileSize, 50);
+				validateFileSizeFromMetadata(binaryData.fileSize, 50, this.getNode());
 
 				const buffer = await this.helpers.getBinaryDataBuffer(
 					i,
@@ -154,7 +117,7 @@ export class DocumentOCRUpstage implements INodeType {
 				);
 
 				// Validate file size from actual buffer
-				validateFileSize(buffer, 50);
+				validateFileSize(buffer, 50, this.getNode());
 
 				// Prepare form fields
 				const fields: Record<string, string> = {
@@ -190,7 +153,7 @@ export class DocumentOCRUpstage implements INodeType {
 
 				// Validate response structure using type guard
 				if (!isDocumentOCRResponse(response)) {
-					throw new Error('Invalid response format from Upstage OCR API');
+					throw new NodeOperationError(this.getNode(), 'Invalid response format from Upstage OCR API');
 				}
 
 				const ocrResponse = response;

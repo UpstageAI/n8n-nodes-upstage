@@ -6,6 +6,7 @@ import type {
 	IHttpRequestOptions,
 	IDataObject,
 } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
 import { handleNodeError } from '../utils/errorHandling';
 import {
 	validateFileSize,
@@ -27,6 +28,9 @@ interface InformationExtractionRequestBody {
 	chunking?: {
 		pages_per_chunk: number;
 	};
+	location?: boolean;
+	confidence?: boolean;
+	split?: boolean;
 }
 
 export class InformationExtractionUpstage implements INodeType {
@@ -109,32 +113,11 @@ export class InformationExtractionUpstage implements INodeType {
 				return fixedJson;
 			} catch (parseError) {
 				if (logger) {
-					logger.debug('Still invalid after basic fix', {
+					logger.debug('Basic bracket fix was insufficient, returning original', {
 						error: (parseError as Error).message,
 					});
 				}
-
-				// Step 4: Advanced modification attempt
-				fixedJson = InformationExtractionUpstage.advancedJsonFix(
-					fixedJson,
-					logger
-				);
-
-				// Step 5: Final validation
-				try {
-					JSON.parse(fixedJson);
-					if (logger) {
-						logger.debug('Advanced fix successful');
-					}
-					return fixedJson;
-				} catch (finalError) {
-					if (logger) {
-						logger.debug('Advanced fix failed', {
-							error: (finalError as Error).message,
-						});
-					}
-					return jsonString; // Return original
-				}
+				return jsonString; // Return original
 			}
 		} catch (error) {
 			if (logger) {
@@ -144,41 +127,6 @@ export class InformationExtractionUpstage implements INodeType {
 			}
 			return jsonString; // Return original
 		}
-	}
-
-	// Advanced JSON modification method
-	private static advancedJsonFix(
-		jsonString: string,
-		logger?: IExecuteFunctions['logger']
-	): string {
-		if (logger) {
-			logger.debug('=== Advanced JSON Fix ===');
-		}
-
-		// Fix specific pattern: when properties object is not properly closed
-		// "properties":{...}}}} -> "properties":{...}}}}
-		const propertiesPattern = /("properties":\{[^}]*)\}\}\}\}/g;
-		if (propertiesPattern.test(jsonString)) {
-			if (logger) {
-				logger.debug('Fixing properties object closure');
-			}
-			jsonString = jsonString.replace(propertiesPattern, '$1}}}');
-		}
-
-		// Other common patterns
-		// Clean up consecutive closing brackets
-		jsonString = jsonString.replace(/\}\}\}+/g, match => {
-			const count = match.length;
-			if (count > 2) {
-				if (logger) {
-					logger.debug(`Reducing ${count} consecutive closing braces to 2`);
-				}
-				return '}}';
-			}
-			return match;
-		});
-
-		return jsonString;
 	}
 
 	// Helper method to get image data URL or HTTP URL from binary or URL input
@@ -195,14 +143,15 @@ export class InformationExtractionUpstage implements INodeType {
 			) as string;
 			const item = items[itemIndex];
 			if (!item.binary || !item.binary[binaryPropertyName]) {
-				throw new Error(
+				throw new NodeOperationError(
+					executeFunctions.getNode(),
 					`No binary data found in property "${binaryPropertyName}".`
 				);
 			}
 			const binaryData = item.binary[binaryPropertyName];
 
 			// Validate file size (50MB limit) - check metadata first if available
-			validateFileSizeFromMetadata(binaryData.fileSize, 50);
+			validateFileSizeFromMetadata(binaryData.fileSize, 50, executeFunctions.getNode());
 
 			const buffer = await executeFunctions.helpers.getBinaryDataBuffer(
 				itemIndex,
@@ -210,7 +159,7 @@ export class InformationExtractionUpstage implements INodeType {
 			);
 
 			// Validate file size from actual buffer
-			validateFileSize(buffer, 50);
+			validateFileSize(buffer, 50, executeFunctions.getNode());
 
 			const mime = binaryData.mimeType || 'application/octet-stream';
 			const base64 = buffer.toString('base64');
@@ -221,7 +170,13 @@ export class InformationExtractionUpstage implements INodeType {
 				itemIndex
 			) as string;
 			if (!imageUrl) {
-				throw new Error('Image URL is required.');
+				throw new NodeOperationError(executeFunctions.getNode(), 'Image URL is required.');
+			}
+			if (!imageUrl.startsWith('https://') && !imageUrl.startsWith('http://')) {
+				throw new NodeOperationError(
+					executeFunctions.getNode(),
+					'Image URL must use http:// or https:// protocol'
+				);
 			}
 			return imageUrl;
 		}
@@ -368,6 +323,35 @@ export class InformationExtractionUpstage implements INodeType {
 				displayOptions: { show: { operation: ['extract'] } },
 			},
 
+			// Additional extraction options
+			{
+				displayName: 'Include Location',
+				name: 'location',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether to return page number and coordinates for each extracted value',
+				displayOptions: { show: { operation: ['extract'] } },
+			},
+			{
+				displayName: 'Include Confidence',
+				name: 'confidence',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether to return confidence score (high/low) for each extracted field',
+				displayOptions: { show: { operation: ['extract'] } },
+			},
+			{
+				displayName: 'Split Multi-Page',
+				name: 'split',
+				type: 'boolean',
+				default: false,
+				description:
+					'Whether to process multi-page documents with split results per page',
+				displayOptions: { show: { operation: ['extract'] } },
+			},
+
 			// Return mode
 			{
 				displayName: 'Return',
@@ -429,10 +413,11 @@ export class InformationExtractionUpstage implements INodeType {
 							} else if (typeof schemaRaw === 'object' && schemaRaw !== null) {
 								schemaObj = schemaRaw as IDataObject;
 							} else {
-								throw new Error('Invalid schema data type');
+								throw new NodeOperationError(this.getNode(), 'Invalid schema data type');
 							}
 						} catch (error) {
-							throw new Error(
+							throw new NodeOperationError(
+								this.getNode(),
 								`Invalid JSON schema provided: ${(error as Error).message}`
 							);
 						}
@@ -491,12 +476,13 @@ export class InformationExtractionUpstage implements INodeType {
 
 								// Step 3: JSON object validation
 								if (typeof parsedJson !== 'object' || parsedJson === null) {
-									throw new Error('Parsed result is not a valid JSON object');
+									throw new NodeOperationError(this.getNode(), 'Parsed result is not a valid JSON object');
 								}
 
 								// Step 4: Required structure validation
 								if (!parsedJson.type || !parsedJson.json_schema) {
-									throw new Error(
+									throw new NodeOperationError(
+										this.getNode(),
 										'Missing required fields: type or json_schema'
 									);
 								}
@@ -514,10 +500,11 @@ export class InformationExtractionUpstage implements INodeType {
 							) {
 								responseFormat = fullResponseRaw as IDataObject;
 							} else {
-								throw new Error('Invalid response format data type');
+								throw new NodeOperationError(this.getNode(), 'Invalid response format data type');
 							}
 						} catch (error) {
-							throw new Error(
+							throw new NodeOperationError(
+								this.getNode(),
 								`Invalid full response format JSON provided: ${(error as Error).message}`
 							);
 						}
@@ -552,6 +539,14 @@ export class InformationExtractionUpstage implements INodeType {
 					if (pagesPerChunk && pagesPerChunk > 0) {
 						requestBody.chunking = { pages_per_chunk: pagesPerChunk };
 					}
+
+					// Additional extraction options
+					const location = this.getNodeParameter('location', i, false) as boolean;
+					const confidence = this.getNodeParameter('confidence', i, false) as boolean;
+					const split = this.getNodeParameter('split', i, false) as boolean;
+					if (location) requestBody.location = true;
+					if (confidence) requestBody.confidence = true;
+					if (split) requestBody.split = true;
 
 					const requestOptions: IHttpRequestOptions = {
 						method: 'POST',
