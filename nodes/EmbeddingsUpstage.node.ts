@@ -5,6 +5,7 @@ import type {
 	INodeExecutionData,
 	IHttpRequestOptions,
 } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
 import { handleNodeError } from '../utils/errorHandling';
 
 interface EmbeddingResponseItem {
@@ -146,7 +147,7 @@ export class EmbeddingsUpstage implements INodeType {
 				}
 
 				if (!input || (Array.isArray(input) && input.length === 0)) {
-					throw new Error('No input text provided');
+					throw new NodeOperationError(this.getNode(), 'No input text provided');
 				}
 
 				// Build request body

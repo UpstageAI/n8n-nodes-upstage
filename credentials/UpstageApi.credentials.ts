@@ -10,6 +10,8 @@ export class UpstageApi implements ICredentialType {
 
 	displayName = 'Upstage API';
 
+	icon = 'file:../upstage_v2.svg' as const;
+
 	documentationUrl =
 		'https://console.upstage.ai/docs/getting-started/quick-start';
 

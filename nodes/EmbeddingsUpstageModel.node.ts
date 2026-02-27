@@ -5,6 +5,8 @@ import type {
 	SupplyData,
 	IExecuteFunctions,
 	NodeConnectionType,
+	IHttpRequestOptions,
+	INode,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 
@@ -48,6 +50,7 @@ export class EmbeddingsUpstageModel implements INodeType {
 		inputs: [],
 		outputs: ['ai_embedding'],
 		outputNames: ['Embeddings'],
+		usableAsTool: true,
 		credentials: [
 			{
 				name: 'upstageApi',
@@ -83,13 +86,27 @@ export class EmbeddingsUpstageModel implements INodeType {
 		itemIndex: number
 	): Promise<SupplyData> {
 		this.logger.debug('Supply data for embeddings');
-		const credentials = await this.getCredentials('upstageApi');
 		const model = this.getNodeParameter('model', itemIndex) as string;
+
+		// Create HTTP request wrapper using n8n's helpers
+		const executeFunctions = this;
+		const httpRequest = async (
+			requestOptions: IHttpRequestOptions
+		): Promise<EmbeddingAPIResponse> => {
+			const response =
+				await executeFunctions.helpers.httpRequestWithAuthentication.call(
+					executeFunctions,
+					'upstageApi',
+					requestOptions
+				);
+			return response as EmbeddingAPIResponse;
+		};
 
 		// Create a custom embedding model that implements the Embeddings interface
 		const embeddingModel = new UpstageEmbeddings({
-			apiKey: credentials.apiKey as string,
 			model,
+			node: this.getNode(),
+			httpRequest,
 		});
 
 		return {
@@ -199,8 +216,9 @@ export function logWrapper<T extends EmbeddingsInterface>(
 
 // Custom Embeddings implementation for Upstage Solar (LangChain-free)
 interface UpstageEmbeddingsParams {
-	apiKey: string;
 	model: string;
+	node: INode;
+	httpRequest: (requestOptions: IHttpRequestOptions) => Promise<EmbeddingAPIResponse>;
 	baseURL?: string;
 	batchSize?: number;
 	stripNewLines?: boolean;
@@ -215,20 +233,20 @@ interface EmbeddingsInterface {
 }
 
 class UpstageEmbeddings implements EmbeddingsInterface {
-	public apiKey: string;
 	public model: string;
 	public baseURL: string;
 	public batchSize: number;
 	public stripNewLines: boolean;
+	private node: INode;
+	private httpRequest: (requestOptions: IHttpRequestOptions) => Promise<EmbeddingAPIResponse>;
 
 	constructor(fields: UpstageEmbeddingsParams) {
-		const { apiKey, model, baseURL, batchSize, stripNewLines } = fields;
-
-		this.apiKey = apiKey;
-		this.model = model;
-		this.baseURL = baseURL ?? 'https://api.upstage.ai/v1';
-		this.batchSize = batchSize ?? 100; // Upstage API limit
-		this.stripNewLines = stripNewLines ?? true;
+		this.model = fields.model;
+		this.node = fields.node;
+		this.httpRequest = fields.httpRequest;
+		this.baseURL = fields.baseURL ?? 'https://api.upstage.ai/v1';
+		this.batchSize = fields.batchSize ?? 100; // Upstage API limit
+		this.stripNewLines = fields.stripNewLines ?? true;
 	}
 
 	/**
@@ -265,74 +283,55 @@ class UpstageEmbeddings implements EmbeddingsInterface {
 	}
 
 	private async callUpstageAPI(input: string[]): Promise<number[][]> {
-		try {
-			// Validate and clean input
-			const cleanInput = input
-				.filter(
-					text => text && typeof text === 'string' && text.trim().length > 0
-				)
-				.map(text => text.trim());
+		// Validate and clean input
+		const cleanInput = input
+			.filter(
+				text => text && typeof text === 'string' && text.trim().length > 0
+			)
+			.map(text => text.trim());
 
-			if (cleanInput.length === 0) {
-				throw new Error('No valid input texts provided for embedding');
-			}
+		if (cleanInput.length === 0) {
+			throw new NodeOperationError(this.node, 'No valid input texts provided for embedding');
+		}
 
-			// Check individual text length (Upstage limit: 4000 tokens per text)
-			for (const text of cleanInput) {
-				if (text.length > 16000) {
-					// Rough estimate: ~4 chars per token
-					// Text length might exceed token limit
-				}
-			}
-
-			// Check batch size (Upstage limit: 100 strings)
-			if (cleanInput.length > 100) {
-				throw new Error(
-					`Too many texts: ${cleanInput.length}. Upstage API supports max 100 strings per request`
-				);
-			}
-
-			// Use single string for single input, array for multiple
-			const requestBody = {
-				model: this.model,
-				input: cleanInput.length === 1 ? cleanInput[0] : cleanInput,
-			};
-
-			const response = await fetch(`${this.baseURL}/embeddings`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					Authorization: `Bearer ${this.apiKey}`,
-				},
-				body: JSON.stringify(requestBody),
-			});
-
-			if (!response.ok) {
-				const errorBody = await response.text();
-				throw new Error(`Upstage API error: ${response.status} - ${errorBody}`);
-			}
-
-			const data = (await response.json()) as EmbeddingAPIResponse;
-
-			if (!data.data || !Array.isArray(data.data)) {
-				throw new Error('Invalid response format from Upstage API');
-			}
-
-			// Sort by index to ensure correct order
-			const sortedData = data.data.sort((a, b) => a.index - b.index);
-
-			// Ensure we return the same number of embeddings as input texts
-			if (sortedData.length !== cleanInput.length) {
-				throw new Error(
-					`Expected ${cleanInput.length} embeddings, got ${sortedData.length}`
-				);
-			}
-
-			return sortedData.map(item => item.embedding);
-		} catch (error) {
-			throw new Error(
-				`Failed to generate embeddings: ${error instanceof Error ? error.message : String(error)}`
+		// Check batch size (Upstage limit: 100 strings)
+		if (cleanInput.length > 100) {
+			throw new NodeOperationError(
+				this.node,
+				`Too many texts: ${cleanInput.length}. Upstage API supports max 100 strings per request`
 			);
 		}
+
+		// Use single string for single input, array for multiple
+		const requestBody = {
+			model: this.model,
+			input: cleanInput.length === 1 ? cleanInput[0] : cleanInput,
+		};
+
+		const requestOptions: IHttpRequestOptions = {
+			method: 'POST',
+			url: `${this.baseURL}/embeddings`,
+			body: requestBody,
+			json: true,
+		};
+
+		const data = await this.httpRequest(requestOptions);
+
+		if (!data.data || !Array.isArray(data.data)) {
+			throw new NodeOperationError(this.node, 'Invalid response format from Upstage API');
+		}
+
+		// Sort by index to ensure correct order
+		const sortedData = data.data.sort((a, b) => a.index - b.index);
+
+		// Ensure we return the same number of embeddings as input texts
+		if (sortedData.length !== cleanInput.length) {
+			throw new NodeOperationError(
+				this.node,
+				`Expected ${cleanInput.length} embeddings, got ${sortedData.length}`
+			);
+		}
+
+		return sortedData.map(item => item.embedding);
 	}
 }
