@@ -73,6 +73,7 @@ describe('errorHandling', () => {
 			mockExecuteFunctions = {
 				logger: mockLogger,
 				continueOnFail: mockContinueOnFail,
+				getNode: jest.fn().mockReturnValue({ name: 'Test Node' }),
 			} as unknown as IExecuteFunctions;
 		});
 

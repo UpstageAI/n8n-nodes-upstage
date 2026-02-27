@@ -6,6 +6,7 @@ import type {
 	IHttpRequestOptions,
 	IDataObject,
 } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
 import { handleNodeError } from '../utils/errorHandling';
 
 interface ToolFunction {
@@ -56,6 +57,7 @@ interface ChatRequestBody extends IDataObject {
 		| 'none'
 		| 'required'
 		| { type: 'function'; function: { name: string } };
+	parallel_tool_calls?: boolean;
 }
 
 export class LmChatUpstage implements INodeType {
@@ -96,7 +98,12 @@ export class LmChatUpstage implements INodeType {
 					{
 						name: 'solar-pro2',
 						value: 'solar-pro2',
-						description: 'Latest and most advanced Solar model',
+						description: 'Advanced Solar model with extended capabilities',
+					},
+					{
+						name: 'solar-pro3',
+						value: 'solar-pro3',
+						description: 'Latest flagship model with 128K context and parallel tool calls',
 					},
 				],
 				default: 'solar-mini',
@@ -218,9 +225,9 @@ export class LmChatUpstage implements INodeType {
 						default: 1000,
 						typeOptions: {
 							minValue: 1,
-							maxValue: 4000,
+							maxValue: 128000,
 						},
-						description: 'Maximum number of tokens to generate',
+						description: 'Maximum number of tokens to generate. Limit depends on model: solar-mini (32K), solar-pro2 (65K), solar-pro3 (128K).',
 					},
 					{
 						displayName: 'Top P',
@@ -250,18 +257,23 @@ export class LmChatUpstage implements INodeType {
 							{
 								name: 'Low',
 								value: 'low',
-								description: 'Disable reasoning for faster responses',
+								description: 'Disable reasoning for fastest responses',
+							},
+							{
+								name: 'Medium',
+								value: 'medium',
+								description: 'Balanced reasoning depth (default for solar-pro3)',
 							},
 							{
 								name: 'High',
 								value: 'high',
 								description:
-									'Enable reasoning for complex tasks (may increase token usage)',
+									'Maximum reasoning depth (may increase token usage)',
 							},
 						],
 						default: 'low',
 						description:
-							'Controls the level of reasoning effort. Only applicable to Reasoning models.',
+							'Controls the level of reasoning effort. solar-pro3 defaults to medium, solar-pro2 requires high to enable reasoning.',
 					},
 					{
 						displayName: 'Frequency Penalty',
@@ -395,6 +407,14 @@ export class LmChatUpstage implements INodeType {
 										description:
 											'The name of the function to call when tool_choice is "specific"',
 									},
+									{
+										displayName: 'Parallel Tool Calls',
+										name: 'parallel_tool_calls',
+										type: 'boolean',
+										default: false,
+										description:
+											'Whether to enable parallel tool invocations. Supported by solar-pro3.',
+									},
 								],
 							},
 						],
@@ -449,6 +469,7 @@ export class LmChatUpstage implements INodeType {
 							};
 							tool_choice?: string;
 							function_name?: string;
+							parallel_tool_calls?: boolean;
 						};
 					};
 				};
@@ -483,7 +504,8 @@ export class LmChatUpstage implements INodeType {
 								},
 							});
 						} catch (error) {
-							throw new Error(
+							throw new NodeOperationError(
+								this.getNode(),
 								`Invalid tool parameters JSON: ${error instanceof Error ? error.message : String(error)}`
 							);
 						}
@@ -497,7 +519,8 @@ export class LmChatUpstage implements INodeType {
 				if (toolChoiceRaw === 'specific') {
 					const functionName = functionCallingConfig?.function_name;
 					if (!functionName) {
-						throw new Error(
+						throw new NodeOperationError(
+							this.getNode(),
 							'Function name is required when tool_choice is "specific"'
 						);
 					}
@@ -511,7 +534,8 @@ export class LmChatUpstage implements INodeType {
 
 				// Validate messages array
 				if (!messagesRaw || messagesRaw.length === 0) {
-					throw new Error(
+					throw new NodeOperationError(
+						this.getNode(),
 						'At least one message is required for chat completion'
 					);
 				}
@@ -520,10 +544,11 @@ export class LmChatUpstage implements INodeType {
 				const messages: ChatMessage[] = [];
 				for (const message of messagesRaw) {
 					if (!message.content || message.content.trim() === '') {
-						throw new Error('All messages must have non-empty content');
+						throw new NodeOperationError(this.getNode(), 'All messages must have non-empty content');
 					}
 					if (!['system', 'user', 'assistant'].includes(message.role)) {
-						throw new Error(
+						throw new NodeOperationError(
+							this.getNode(),
 							`Invalid message role: ${message.role}. Must be 'system', 'user', or 'assistant'`
 						);
 					}
@@ -550,6 +575,9 @@ export class LmChatUpstage implements INodeType {
 				if (tools.length > 0) {
 					requestBody.tools = tools;
 					requestBody.tool_choice = toolChoice;
+					if (functionCallingConfig?.parallel_tool_calls) {
+						requestBody.parallel_tool_calls = true;
+					}
 				}
 
 				// Handle response_format properly according to Upstage API documentation:
@@ -562,7 +590,8 @@ export class LmChatUpstage implements INodeType {
 				} else if (responseFormat === 'json_schema') {
 					// Structured outputs: Generate JSON with custom schema
 					if (!jsonSchema || jsonSchema.trim() === '' || jsonSchema === '{}') {
-						throw new Error(
+						throw new NodeOperationError(
+							this.getNode(),
 							'JSON Schema is required when Response Format is set to "JSON Schema"'
 						);
 					}
@@ -573,7 +602,8 @@ export class LmChatUpstage implements INodeType {
 							json_schema: schema,
 						};
 					} catch (error) {
-						throw new Error(
+						throw new NodeOperationError(
+							this.getNode(),
 							`Invalid JSON schema provided: ${error instanceof Error ? error.message : String(error)}`
 						);
 					}
@@ -624,17 +654,26 @@ export class LmChatUpstage implements INodeType {
 
 				// Add tool_calls if present
 				if (toolCalls.length > 0) {
-					responseData.tool_calls = toolCalls.map((tc: ToolCall) => ({
-						id: tc.id,
-						type: tc.type,
-						function: {
-							name: tc.function.name,
-							arguments:
-								typeof tc.function.arguments === 'string'
-									? JSON.parse(tc.function.arguments)
-									: tc.function.arguments,
-						},
-					}));
+					responseData.tool_calls = toolCalls.map((tc: ToolCall) => {
+						let parsedArgs: unknown;
+						if (typeof tc.function.arguments === 'string') {
+							try {
+								parsedArgs = JSON.parse(tc.function.arguments);
+							} catch {
+								parsedArgs = tc.function.arguments;
+							}
+						} else {
+							parsedArgs = tc.function.arguments;
+						}
+						return {
+							id: tc.id,
+							type: tc.type,
+							function: {
+								name: tc.function.name,
+								arguments: parsedArgs,
+							},
+						};
+					});
 					responseData.has_tool_calls = true;
 				} else {
 					responseData.has_tool_calls = false;

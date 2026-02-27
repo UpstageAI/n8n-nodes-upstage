@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-upstage",
-  "version": "0.3.6",
+  "version": "0.4.0",
   "description": "Upstage LLM and Embeddings nodes for n8n",
   "license": "MIT",
   "homepage": "https://github.com/UpstageAI/n8n-nodes-upstage",
@@ -43,6 +43,7 @@
   ],
   "n8n": {
     "n8nNodesApiVersion": 1,
+    "aiNodeSdkVersion": 1,
     "credentials": [
       "dist/credentials/UpstageApi.credentials.js"
     ],
@@ -61,6 +62,7 @@
     "node": ">=18.0.0"
   },
   "devDependencies": {
+    "@n8n/ai-node-sdk": "^0.2.0",
     "@types/jest": "^29.5.14",
     "@types/node": "^20.0.0",
     "@typescript-eslint/eslint-plugin": "7.18.0",
@@ -76,8 +78,8 @@
     "typescript": "^5.0.0"
   },
   "peerDependencies": {
-    "n8n-core": ">=1.0.0",
-    "n8n-workflow": ">=1.0.0"
+    "@n8n/ai-node-sdk": "*",
+    "n8n-workflow": "*"
   },
   "author": {
     "name": "Euihyeon Pyeon",
@@ -85,6 +87,5 @@
   },
   "bugs": {
     "url": "https://github.com/UpstageAI/n8n-nodes-upstage/issues"
-  },
-  "dependencies": {}
+  }
 }

@@ -6,6 +6,7 @@ import type {
 	IHttpRequestOptions,
 	JsonObject,
 } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
 import { handleNodeError } from '../utils/errorHandling';
 import {
 	validateFileSize,
@@ -15,49 +16,10 @@ import {
 	isDocumentParsingResponse,
 	type DocumentParsingResponse,
 } from '../utils/typeGuards';
+import { createMultipartFormData } from '../utils/multipartHelpers';
 
 interface AsyncSubmitResponse {
 	request_id?: string;
-}
-
-// Helper function to create multipart/form-data without external dependencies
-function createMultipartFormData(
-	fields: Record<string, string>,
-	file: { buffer: Buffer; filename: string; contentType: string }
-): { body: Buffer; contentType: string } {
-	const boundary =
-		'----WebKitFormBoundary' + Math.random().toString(36).substring(2);
-	const parts: Buffer[] = [];
-
-	// Add text fields
-	for (const [name, value] of Object.entries(fields)) {
-		parts.push(
-			Buffer.from(
-				`--${boundary}\r\n` +
-					`Content-Disposition: form-data; name="${name}"\r\n\r\n` +
-					`${value}\r\n`
-			)
-		);
-	}
-
-	// Add file
-	parts.push(
-		Buffer.from(
-			`--${boundary}\r\n` +
-				`Content-Disposition: form-data; name="document"; filename="${file.filename}"\r\n` +
-				`Content-Type: ${file.contentType}\r\n\r\n`
-		)
-	);
-	parts.push(file.buffer);
-	parts.push(Buffer.from('\r\n'));
-
-	// End boundary
-	parts.push(Buffer.from(`--${boundary}--\r\n`));
-
-	return {
-		body: Buffer.concat(parts),
-		contentType: `multipart/form-data; boundary=${boundary}`,
-	};
 }
 
 export class DocumentParsingUpstage implements INodeType {
@@ -174,6 +136,19 @@ export class DocumentParsingUpstage implements INodeType {
 				displayOptions: { show: { operation: ['sync', 'asyncSubmit'] } },
 			},
 			{
+				displayName: 'Table Output Format',
+				name: 'tableOutputFormat',
+				type: 'options',
+				options: [
+					{ name: 'HTML (Default)', value: '' },
+					{ name: 'Markdown', value: 'markdown' },
+					{ name: 'CSV', value: 'csv' },
+				],
+				default: '',
+				description: 'Controls how tables are structured in the output',
+				displayOptions: { show: { operation: ['sync', 'asyncSubmit'] } },
+			},
+			{
 				displayName: 'Return',
 				name: 'returnMode',
 				type: 'options',
@@ -239,7 +214,8 @@ export class DocumentParsingUpstage implements INodeType {
 
 					const item = items[i];
 					if (!item.binary || !item.binary[binaryPropertyName]) {
-						throw new Error(
+						throw new NodeOperationError(
+							this.getNode(),
 							`No binary data found in property "${binaryPropertyName}".`
 						);
 					}
@@ -247,7 +223,7 @@ export class DocumentParsingUpstage implements INodeType {
 					const binaryData = item.binary[binaryPropertyName];
 
 					// Validate file size (50MB limit) - check metadata first if available
-					validateFileSizeFromMetadata(binaryData.fileSize, 50);
+					validateFileSizeFromMetadata(binaryData.fileSize, 50, this.getNode());
 
 					const buffer = await this.helpers.getBinaryDataBuffer(
 						i,
@@ -255,7 +231,13 @@ export class DocumentParsingUpstage implements INodeType {
 					);
 
 					// Validate file size from actual buffer
-					validateFileSize(buffer, 50);
+					validateFileSize(buffer, 50, this.getNode());
+
+					const tableOutputFormat = this.getNodeParameter(
+						'tableOutputFormat',
+						i,
+						''
+					) as string;
 
 					// Prepare form fields
 					const fields: Record<string, string> = {
@@ -265,6 +247,10 @@ export class DocumentParsingUpstage implements INodeType {
 						coordinates: coordinates.toString(),
 						chart_recognition: chartRecognition.toString(),
 					};
+
+					if (tableOutputFormat) {
+						fields.table_output_format = tableOutputFormat;
+					}
 
 					if (base64Categories.length > 0) {
 						fields.base64_encoding = JSON.stringify(base64Categories);
@@ -305,7 +291,8 @@ export class DocumentParsingUpstage implements INodeType {
 					if (operation === 'sync') {
 						// Validate response structure using type guard
 						if (!isDocumentParsingResponse(response)) {
-							throw new Error(
+							throw new NodeOperationError(
+								this.getNode(),
 								'Invalid response format from Upstage Document Parsing API'
 							);
 						}
@@ -347,7 +334,7 @@ export class DocumentParsingUpstage implements INodeType {
 					}
 				} else if (operation === 'asyncGet') {
 					const requestId = this.getNodeParameter('requestId', i) as string;
-					if (!requestId) throw new Error('Request ID is required.');
+					if (!requestId) throw new NodeOperationError(this.getNode(), 'Request ID is required.');
 					const requestOptions: IHttpRequestOptions = {
 						method: 'GET',
 						url: `https://api.upstage.ai/v1/document-digitization/requests/${encodeURIComponent(requestId)}`,

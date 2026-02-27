@@ -5,6 +5,7 @@ import type {
 	INodeExecutionData,
 	IHttpRequestOptions,
 } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
 import { handleNodeError } from '../utils/errorHandling';
 import {
 	validateFileSize,
@@ -197,7 +198,8 @@ export class DocumentClassificationUpstage implements INodeType {
 					const item = items[i];
 
 					if (!item.binary || !item.binary[binaryPropertyName]) {
-						throw new Error(
+						throw new NodeOperationError(
+							this.getNode(),
 							`No binary data found in property "${binaryPropertyName}".`
 						);
 					}
@@ -205,7 +207,7 @@ export class DocumentClassificationUpstage implements INodeType {
 					const binaryData = item.binary[binaryPropertyName];
 
 					// Validate file size (50MB limit) - check metadata first if available
-					validateFileSizeFromMetadata(binaryData.fileSize, 50);
+					validateFileSizeFromMetadata(binaryData.fileSize, 50, this.getNode());
 
 					const buffer = await this.helpers.getBinaryDataBuffer(
 						i,
@@ -213,7 +215,7 @@ export class DocumentClassificationUpstage implements INodeType {
 					);
 
 					// Validate file size from actual buffer
-					validateFileSize(buffer, 50);
+					validateFileSize(buffer, 50, this.getNode());
 
 					const base64Data = buffer.toString('base64');
 
@@ -228,7 +230,13 @@ export class DocumentClassificationUpstage implements INodeType {
 				} else {
 					const imageUrl = this.getNodeParameter('imageUrl', i) as string;
 					if (!imageUrl) {
-						throw new Error('Image URL is required when input type is URL.');
+						throw new NodeOperationError(this.getNode(), 'Image URL is required when input type is URL.');
+					}
+					if (!imageUrl.startsWith('https://') && !imageUrl.startsWith('http://')) {
+						throw new NodeOperationError(
+							this.getNode(),
+							'Image URL must use http:// or https:// protocol'
+						);
 					}
 
 					content = [
@@ -253,7 +261,8 @@ export class DocumentClassificationUpstage implements INodeType {
 				} else {
 					// Use raw JSON input
 					if (!rawJsonSchema) {
-						throw new Error(
+						throw new NodeOperationError(
+							this.getNode(),
 							'Raw JSON schema is required when input type is JSON.'
 						);
 					}
@@ -261,10 +270,14 @@ export class DocumentClassificationUpstage implements INodeType {
 					try {
 						oneOf = JSON.parse(rawJsonSchema);
 						if (!Array.isArray(oneOf)) {
-							throw new Error('Raw JSON schema must be an array.');
+							throw new NodeOperationError(this.getNode(), 'Raw JSON schema must be an array.');
 						}
 					} catch (parseError) {
-						throw new Error(
+						if (parseError instanceof NodeOperationError) {
+							throw parseError;
+						}
+						throw new NodeOperationError(
+							this.getNode(),
 							`Invalid JSON format: ${(parseError as Error).message}`
 						);
 					}

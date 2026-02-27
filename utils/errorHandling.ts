@@ -1,4 +1,5 @@
 import type { IExecuteFunctions, INodeExecutionData } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
 
 /**
  * Extracts error message from an error object
@@ -70,7 +71,8 @@ export function handleNodeError(
 			pairedItem: { item: itemIndex },
 		});
 	} else {
-		throw new Error(
+		throw new NodeOperationError(
+			executeFunctions.getNode(),
 			`${nodeName} failed for item ${itemIndex}: ${errorMessage}`
 		);
 	}
